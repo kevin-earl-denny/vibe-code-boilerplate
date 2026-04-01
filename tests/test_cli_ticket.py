@@ -870,11 +870,7 @@ class TestBatchAssignProject:
 
     def test_happy_path(self, tmp_path) -> None:
         yaml_file = tmp_path / "projects.yaml"
-        yaml_file.write_text(
-            "projects:\n"
-            "  - name: 'My Project'\n"
-            "    tickets: [TEST-1, TEST-2]\n"
-        )
+        yaml_file.write_text("projects:\n  - name: 'My Project'\n    tickets: [TEST-1, TEST-2]\n")
 
         runner = CliRunner()
         mock_tracker = MagicMock()
@@ -894,11 +890,7 @@ class TestBatchAssignProject:
 
     def test_partial_failure(self, tmp_path) -> None:
         yaml_file = tmp_path / "projects.yaml"
-        yaml_file.write_text(
-            "projects:\n"
-            "  - name: 'My Project'\n"
-            "    tickets: [TEST-1, TEST-2]\n"
-        )
+        yaml_file.write_text("projects:\n  - name: 'My Project'\n    tickets: [TEST-1, TEST-2]\n")
 
         runner = CliRunner()
         mock_tracker = MagicMock()
@@ -917,10 +909,7 @@ class TestBatchAssignProject:
 
     def test_missing_name_field(self, tmp_path) -> None:
         yaml_file = tmp_path / "projects.yaml"
-        yaml_file.write_text(
-            "projects:\n"
-            "  - tickets: [TEST-1]\n"
-        )
+        yaml_file.write_text("projects:\n  - tickets: [TEST-1]\n")
 
         runner = CliRunner()
         result = runner.invoke(
@@ -946,11 +935,7 @@ class TestBatchAssignProject:
 
     def test_unsupported_tracker(self, tmp_path) -> None:
         yaml_file = tmp_path / "projects.yaml"
-        yaml_file.write_text(
-            "projects:\n"
-            "  - name: 'My Project'\n"
-            "    tickets: [TEST-1]\n"
-        )
+        yaml_file.write_text("projects:\n  - name: 'My Project'\n    tickets: [TEST-1]\n")
 
         runner = CliRunner()
         mock_tracker = MagicMock(spec=[])  # No create_project attribute

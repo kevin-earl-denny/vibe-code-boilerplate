@@ -1249,11 +1249,13 @@ def batch_assign_project(from_file: str, dry_run: bool) -> None:
             sys.exit(1)
         tickets = proj.get("tickets", [])
         if not tickets:
-            click.echo(f"Warning: project \"{proj['name']}\" has no tickets listed.", err=True)
+            click.echo(f'Warning: project "{proj["name"]}" has no tickets listed.', err=True)
         total_assignments += len(tickets)
 
     if dry_run:
-        click.echo(f"DRY RUN — Would assign {total_assignments} tickets across {len(projects_data)} projects:\n")
+        click.echo(
+            f"DRY RUN — Would assign {total_assignments} tickets across {len(projects_data)} projects:\n"
+        )
         for proj in projects_data:
             tickets = proj.get("tickets", [])
             ticket_ids = ", ".join(str(t) for t in tickets)
@@ -1265,7 +1267,10 @@ def batch_assign_project(from_file: str, dry_run: bool) -> None:
     tracker = ensure_tracker_configured()
 
     if not hasattr(tracker, "create_project"):
-        click.echo("Batch project assignment is only supported for trackers with project support (e.g. Linear).", err=True)
+        click.echo(
+            "Batch project assignment is only supported for trackers with project support (e.g. Linear).",
+            err=True,
+        )
         sys.exit(1)
 
     succeeded = 0
