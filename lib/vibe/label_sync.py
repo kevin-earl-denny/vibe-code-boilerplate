@@ -110,9 +110,7 @@ def sync_labels_to_config(
             - "changed": whether the config was actually modified
     """
     if not hasattr(tracker, "list_labels"):
-        raise NotImplementedError(
-            f"Label syncing is not supported by the {tracker.name} tracker."
-        )
+        raise NotImplementedError(f"Label syncing is not supported by the {tracker.name} tracker.")
 
     tracker_labels = tracker.list_labels()
     config = load_config(base_path)

@@ -267,11 +267,13 @@ class TestSyncLabelsCommand:
         ]
 
         runner = CliRunner()
-        with patch("lib.vibe.config.load_config", return_value=self.CONFIG_WITH_DEFAULTS.copy()), \
-             patch("lib.vibe.trackers.linear.LinearTracker", return_value=mock_tracker), \
-             patch("lib.vibe.label_sync.load_config", return_value=self.CONFIG_WITH_DEFAULTS.copy()), \
-             patch("lib.vibe.label_sync.save_config"), \
-             patch.dict("os.environ", {"LINEAR_API_KEY": "test-key"}):
+        with (
+            patch("lib.vibe.config.load_config", return_value=self.CONFIG_WITH_DEFAULTS.copy()),
+            patch("lib.vibe.trackers.linear.LinearTracker", return_value=mock_tracker),
+            patch("lib.vibe.label_sync.load_config", return_value=self.CONFIG_WITH_DEFAULTS.copy()),
+            patch("lib.vibe.label_sync.save_config"),
+            patch.dict("os.environ", {"LINEAR_API_KEY": "test-key"}),
+        ):
             result = runner.invoke(main, ["sync-labels"])
 
         assert result.exit_code == 0
@@ -281,9 +283,15 @@ class TestSyncLabelsCommand:
         from lib.vibe.cli.main import main
 
         runner = CliRunner()
-        with patch("lib.vibe.config.load_config", return_value={
-            "tracker": {"type": "linear", "config": {"team_id": "t1"}},
-        }), patch.dict("os.environ", {}, clear=False):
+        with (
+            patch(
+                "lib.vibe.config.load_config",
+                return_value={
+                    "tracker": {"type": "linear", "config": {"team_id": "t1"}},
+                },
+            ),
+            patch.dict("os.environ", {}, clear=False),
+        ):
             # Ensure LINEAR_API_KEY is not set
             os.environ.pop("LINEAR_API_KEY", None)
             result = runner.invoke(main, ["sync-labels"])
@@ -295,7 +303,9 @@ class TestSyncLabelsCommand:
         from lib.vibe.cli.main import main
 
         runner = CliRunner()
-        with patch("lib.vibe.config.load_config", return_value={"tracker": {"type": None, "config": {}}}):
+        with patch(
+            "lib.vibe.config.load_config", return_value={"tracker": {"type": None, "config": {}}}
+        ):
             result = runner.invoke(main, ["sync-labels"])
 
         assert result.exit_code == 1
@@ -311,11 +321,13 @@ class TestSyncLabelsCommand:
         ]
 
         runner = CliRunner()
-        with patch("lib.vibe.config.load_config", return_value=self.CONFIG_WITH_DEFAULTS.copy()), \
-             patch("lib.vibe.trackers.linear.LinearTracker", return_value=mock_tracker), \
-             patch("lib.vibe.label_sync.load_config", return_value=self.CONFIG_WITH_DEFAULTS.copy()), \
-             patch("lib.vibe.label_sync.save_config") as mock_save, \
-             patch.dict("os.environ", {"LINEAR_API_KEY": "test-key"}):
+        with (
+            patch("lib.vibe.config.load_config", return_value=self.CONFIG_WITH_DEFAULTS.copy()),
+            patch("lib.vibe.trackers.linear.LinearTracker", return_value=mock_tracker),
+            patch("lib.vibe.label_sync.load_config", return_value=self.CONFIG_WITH_DEFAULTS.copy()),
+            patch("lib.vibe.label_sync.save_config") as mock_save,
+            patch.dict("os.environ", {"LINEAR_API_KEY": "test-key"}),
+        ):
             result = runner.invoke(main, ["sync-labels", "--dry-run"])
 
         assert result.exit_code == 0
@@ -329,11 +341,22 @@ class TestSyncLabelsCommand:
         mock_tracker.list_labels.return_value = [{"name": "Bug", "id": "1"}]
 
         runner = CliRunner()
-        with patch("lib.vibe.config.load_config", return_value={"tracker": {"type": "linear", "config": {"team_id": "t1"}}, "labels": {}}), \
-             patch("lib.vibe.trackers.linear.LinearTracker", return_value=mock_tracker), \
-             patch("lib.vibe.label_sync.load_config", return_value={"tracker": {"type": "linear", "config": {}}, "labels": {}}), \
-             patch("lib.vibe.label_sync.save_config"), \
-             patch.dict("os.environ", {"LINEAR_API_KEY": "test-key"}):
+        with (
+            patch(
+                "lib.vibe.config.load_config",
+                return_value={
+                    "tracker": {"type": "linear", "config": {"team_id": "t1"}},
+                    "labels": {},
+                },
+            ),
+            patch("lib.vibe.trackers.linear.LinearTracker", return_value=mock_tracker),
+            patch(
+                "lib.vibe.label_sync.load_config",
+                return_value={"tracker": {"type": "linear", "config": {}}, "labels": {}},
+            ),
+            patch("lib.vibe.label_sync.save_config"),
+            patch.dict("os.environ", {"LINEAR_API_KEY": "test-key"}),
+        ):
             result = runner.invoke(main, ["sync-labels", "--json"])
 
         assert result.exit_code == 0
