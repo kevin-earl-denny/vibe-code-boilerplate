@@ -644,7 +644,7 @@ def create_human_followup(
     "--label",
     "-l",
     multiple=True,
-    help="Set labels (replaces existing for trackers that support it)",
+    help="Add labels (merged with existing labels)",
 )
 @click.option("--blocked-by", multiple=True, help="Add tickets that block this ticket")
 @click.option("--blocks", multiple=True, help="Add tickets that this ticket blocks")

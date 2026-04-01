@@ -610,7 +610,7 @@ class TestLinearTrackerUpdateTicket:
             "title": "Title",
             "description": "Desc",
             "state": {"name": "Todo"},
-            "labels": {"nodes": [{"name": "Backend"}]},
+            "labels": {"nodes": [{"id": "label-id-1", "name": "Backend"}]},
             "url": "https://linear.app/test/issue/TEST-1",
         }
         mock_response = {"data": {"issueUpdate": {"success": True, "issue": mock_updated_issue}}}
@@ -622,6 +622,88 @@ class TestLinearTrackerUpdateTicket:
                     ticket = tracker.update_ticket("TEST-1", labels=["Backend"])
 
         assert "Backend" in ticket.labels
+
+    def test_update_ticket_labels_merges_with_existing(self) -> None:
+        """update_ticket with labels should merge new labels with existing ones."""
+        tracker = LinearTracker(api_key="test-fake-key")
+        mock_current_issue = {
+            "id": "uuid-1",
+            "identifier": "TEST-1",
+            "title": "Title",
+            "description": "Desc",
+            "state": {"name": "Todo"},
+            "team": {"id": "team_abc"},
+            "labels": {"nodes": [
+                {"id": "existing-label-1", "name": "Feature"},
+                {"id": "existing-label-2", "name": "Frontend"},
+            ]},
+            "url": "https://linear.app/test/issue/TEST-1",
+        }
+        mock_updated_issue = {
+            "id": "uuid-1",
+            "identifier": "TEST-1",
+            "title": "Title",
+            "description": "Desc",
+            "state": {"name": "Todo"},
+            "labels": {"nodes": [
+                {"id": "existing-label-1", "name": "Feature"},
+                {"id": "existing-label-2", "name": "Frontend"},
+                {"id": "new-label-1", "name": "Backend"},
+            ]},
+            "url": "https://linear.app/test/issue/TEST-1",
+        }
+        mock_response = {"data": {"issueUpdate": {"success": True, "issue": mock_updated_issue}}}
+
+        with patch.object(tracker, "get_ticket") as mock_get:
+            mock_get.return_value = tracker._parse_issue(mock_current_issue)
+            with patch.object(tracker, "_get_or_create_label_ids", return_value=["new-label-1"]) as mock_labels:
+                with patch.object(tracker, "_execute_query", return_value=mock_response) as mock_exec:
+                    ticket = tracker.update_ticket("TEST-1", labels=["Backend"])
+
+        # Verify the mutation was called with merged label IDs
+        call_args = mock_exec.call_args
+        input_obj = call_args[0][1]["input"]
+        assert set(input_obj["labelIds"]) == {"existing-label-1", "existing-label-2", "new-label-1"}
+
+        # Verify the returned ticket has all labels
+        assert "Feature" in ticket.labels
+        assert "Frontend" in ticket.labels
+        assert "Backend" in ticket.labels
+
+    def test_update_ticket_labels_deduplicates(self) -> None:
+        """Adding a label that already exists should not create duplicates."""
+        tracker = LinearTracker(api_key="test-fake-key")
+        mock_current_issue = {
+            "id": "uuid-1",
+            "identifier": "TEST-1",
+            "title": "Title",
+            "description": "Desc",
+            "state": {"name": "Todo"},
+            "team": {"id": "team_abc"},
+            "labels": {"nodes": [{"id": "label-1", "name": "Backend"}]},
+            "url": "https://linear.app/test/issue/TEST-1",
+        }
+        mock_updated_issue = {
+            "id": "uuid-1",
+            "identifier": "TEST-1",
+            "title": "Title",
+            "description": "Desc",
+            "state": {"name": "Todo"},
+            "labels": {"nodes": [{"id": "label-1", "name": "Backend"}]},
+            "url": "https://linear.app/test/issue/TEST-1",
+        }
+        mock_response = {"data": {"issueUpdate": {"success": True, "issue": mock_updated_issue}}}
+
+        with patch.object(tracker, "get_ticket") as mock_get:
+            mock_get.return_value = tracker._parse_issue(mock_current_issue)
+            with patch.object(tracker, "_get_or_create_label_ids", return_value=["label-1"]):
+                with patch.object(tracker, "_execute_query", return_value=mock_response) as mock_exec:
+                    tracker.update_ticket("TEST-1", labels=["Backend"])
+
+        # Should only have the one label ID, no duplicates
+        call_args = mock_exec.call_args
+        input_obj = call_args[0][1]["input"]
+        assert input_obj["labelIds"] == ["label-1"]
 
     def test_update_ticket_uses_uuid_not_identifier(self) -> None:
         """The issueUpdate mutation must receive the UUID, not the identifier."""

@@ -117,7 +117,7 @@ class LinearTracker(TrackerBase):
                 description
                 state {{ id name }}
                 team {{ id }}
-                labels {{ nodes {{ name }} }}
+                labels {{ nodes {{ id name }} }}
                 url
                 priority
                 assignee {{ id name email }}
@@ -168,7 +168,7 @@ class LinearTracker(TrackerBase):
                     title
                     description
                     state { name }
-                    labels { nodes { name } }
+                    labels { nodes { id name } }
                     url
                     priority
                     assignee { name }
@@ -287,7 +287,7 @@ class LinearTracker(TrackerBase):
                     title
                     description
                     state { name }
-                    labels { nodes { name } }
+                    labels { nodes { id name } }
                     url
                     priority
                     assignee { name }
@@ -373,7 +373,7 @@ class LinearTracker(TrackerBase):
             title: New title
             description: New description
             status: New status name
-            labels: New labels (replaces existing)
+            labels: Labels to add (merged with existing labels)
             project: Project name to add ticket to
             project_id: Project UUID
             remove_project: If True, remove from current project
@@ -418,9 +418,16 @@ class LinearTracker(TrackerBase):
         if labels:
             team_id = (issue.raw.get("team") or {}).get("id") or self._team_id
             if team_id:
-                label_ids = self._get_or_create_label_ids(team_id, labels)
-                if label_ids:
-                    input_obj["labelIds"] = label_ids
+                new_label_ids = self._get_or_create_label_ids(team_id, labels)
+                if new_label_ids:
+                    # Merge with existing label IDs so --label is additive
+                    existing_label_ids = [
+                        node["id"]
+                        for node in issue.raw.get("labels", {}).get("nodes", [])
+                        if "id" in node
+                    ]
+                    merged = list(dict.fromkeys(existing_label_ids + new_label_ids))
+                    input_obj["labelIds"] = merged
 
         # Project support
         if remove_project:
@@ -473,7 +480,7 @@ class LinearTracker(TrackerBase):
                     title
                     description
                     state { name }
-                    labels { nodes { name } }
+                    labels { nodes { id name } }
                     url
                     priority
                     assignee { name }
