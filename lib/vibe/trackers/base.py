@@ -125,9 +125,7 @@ class TrackerBase(ABC):
         Returns list of dicts with keys: author, date, body, is_bot.
         Override in trackers that support comment retrieval.
         """
-        raise NotImplementedError(
-            f"Comment retrieval is not supported by the {self.name} tracker."
-        )
+        raise NotImplementedError(f"Comment retrieval is not supported by the {self.name} tracker.")
 
     def add_relation(self, ticket_id: str, related_id: str, relation_type: str = "related") -> None:
         """Create a non-hierarchical relationship between two tickets.

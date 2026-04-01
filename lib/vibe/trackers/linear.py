@@ -605,12 +605,14 @@ class LinearTracker(TrackerBase):
                 author = f"Bot: {node['botActor'].get('name', 'Unknown')}"
             else:
                 author = (node.get("user") or {}).get("name", "Unknown")
-            comments.append({
-                "author": author,
-                "date": node.get("createdAt", ""),
-                "body": node.get("body", ""),
-                "is_bot": is_bot,
-            })
+            comments.append(
+                {
+                    "author": author,
+                    "date": node.get("createdAt", ""),
+                    "body": node.get("body", ""),
+                    "is_bot": is_bot,
+                }
+            )
         return comments
 
     def validate_config(self) -> tuple[bool, list[str]]:
