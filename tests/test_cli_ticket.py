@@ -903,7 +903,7 @@ class TestBatchAssignProject:
                 ["batch", "assign-project", "--from", str(yaml_file)],
             )
 
-        assert result.exit_code == 0
+        assert result.exit_code != 0
         assert "Assigned 1/2 tickets" in result.output
         assert "1 failed" in result.output
 
@@ -948,3 +948,51 @@ class TestBatchAssignProject:
 
         assert result.exit_code != 0
         assert "only supported for trackers with project support" in result.output
+
+    def test_invalid_yaml_root(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("- just a list\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["batch", "assign-project", "--from", str(yaml_file)],
+        )
+
+        assert result.exit_code != 0
+        assert "YAML root must be a mapping" in result.output
+
+    def test_tickets_not_a_list(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("projects:\n  - name: 'My Project'\n    tickets: TEST-1\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["batch", "assign-project", "--from", str(yaml_file)],
+        )
+
+        assert result.exit_code != 0
+        assert "must be a list" in result.output
+
+    def test_duplicate_ticket_warning(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text(
+            "projects:\n"
+            "  - name: 'Project A'\n"
+            "    tickets: [TEST-1]\n"
+            "  - name: 'Project B'\n"
+            "    tickets: [TEST-1]\n"
+        )
+
+        runner = CliRunner()
+        mock_tracker = MagicMock()
+        mock_tracker.create_project = True
+
+        with patch("lib.vibe.cli.ticket.ensure_tracker_configured", return_value=mock_tracker):
+            result = runner.invoke(
+                main,
+                ["batch", "assign-project", "--from", str(yaml_file)],
+            )
+
+        assert "appears in multiple projects" in result.output

@@ -1236,6 +1236,10 @@ def batch_assign_project(from_file: str, dry_run: bool) -> None:
     with open(from_file) as f:
         data = yaml.safe_load(f)
 
+    if not isinstance(data, dict):
+        click.echo("Error: YAML root must be a mapping with a 'projects' key.", err=True)
+        sys.exit(1)
+
     projects_data = data.get("projects", [])
     if not projects_data:
         click.echo("No projects found in YAML file.")
@@ -1243,13 +1247,30 @@ def batch_assign_project(from_file: str, dry_run: bool) -> None:
 
     # Validate structure
     total_assignments = 0
+    seen_tickets: set[str] = set()
     for proj in projects_data:
+        if not isinstance(proj, dict):
+            click.echo(
+                "Error: each project entry must be a mapping with 'name' and 'tickets'.", err=True
+            )
+            sys.exit(1)
         if "name" not in proj:
             click.echo("Error: each project entry must have a 'name' field.", err=True)
             sys.exit(1)
         tickets = proj.get("tickets", [])
+        if not isinstance(tickets, list):
+            click.echo(
+                f'Error: "tickets" for project "{proj["name"]}" must be a list.',
+                err=True,
+            )
+            sys.exit(1)
         if not tickets:
             click.echo(f'Warning: project "{proj["name"]}" has no tickets listed.', err=True)
+        for t in tickets:
+            tid = str(t)
+            if tid in seen_tickets:
+                click.echo(f"Warning: ticket {tid} appears in multiple projects.", err=True)
+            seen_tickets.add(tid)
         total_assignments += len(tickets)
 
     if dry_run:
@@ -1293,6 +1314,7 @@ def batch_assign_project(from_file: str, dry_run: bool) -> None:
     click.echo(f"\nAssigned {succeeded}/{total_assignments} tickets.")
     if failed:
         click.echo(f"{failed} failed.", err=True)
+        sys.exit(1)
 
 
 def print_ticket(ticket: Ticket, show_children: bool = False) -> None:

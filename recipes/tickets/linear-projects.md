@@ -86,6 +86,8 @@ bin/ticket list --project "Q1 Roadmap"
 
 When bootstrapping projects on an existing board with many tickets:
 
+> **Note:** This command assigns tickets to **existing** projects. Create the projects first with `bin/ticket project create "Name"` before running bulk assignment.
+
 ```bash
 bin/ticket batch assign-project --from project-assignments.yaml
 bin/ticket batch assign-project --from project-assignments.yaml --dry-run
