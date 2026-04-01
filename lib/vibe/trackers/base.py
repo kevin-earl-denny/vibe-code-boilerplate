@@ -37,6 +37,9 @@ class Ticket:
     parent_id: str | None = None  # Parent ticket identifier
     parent_title: str | None = None  # Parent ticket title
     children: list["Ticket"] = field(default_factory=list)  # Sub-tasks
+    blocks: list[str] = field(default_factory=list)  # Ticket IDs this blocks
+    blocked_by: list[str] = field(default_factory=list)  # Ticket IDs blocking this
+    comments: list[dict] = field(default_factory=list)  # Loaded on demand
 
 
 class TrackerBase(ABC):
@@ -114,6 +117,16 @@ class TrackerBase(ABC):
         """
         raise NotImplementedError(
             f"Parent relationships are not supported by the {self.name} tracker."
+        )
+
+    def get_comments(self, ticket_id: str, limit: int = 20) -> list[dict]:
+        """Fetch comments for a ticket.
+
+        Returns list of dicts with keys: author, date, body, is_bot.
+        Override in trackers that support comment retrieval.
+        """
+        raise NotImplementedError(
+            f"Comment retrieval is not supported by the {self.name} tracker."
         )
 
     def add_relation(self, ticket_id: str, related_id: str, relation_type: str = "related") -> None:

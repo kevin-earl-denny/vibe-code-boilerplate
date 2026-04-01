@@ -124,6 +124,17 @@ class LinearTracker(TrackerBase):
                 assignee {{ id name email }}
                 project {{ id name state }}
                 parent {{ id identifier title }}
+                relations(first: 50) {{
+                    nodes {{
+                        id
+                        type
+                        relatedIssue {{
+                            identifier
+                            title
+                            state {{ name }}
+                        }}
+                    }}
+                }}
                 {children_fragment}
             }}
         }}
@@ -184,6 +195,17 @@ class LinearTracker(TrackerBase):
                     assignee {{ name }}
                     project {{ name state }}
                     parent {{ identifier }}
+                    relations(first: 50) {{
+                        nodes {{
+                            id
+                            type
+                            relatedIssue {{
+                                identifier
+                                title
+                                state {{ name }}
+                            }}
+                        }}
+                    }}
                     {relations_fragment}
                 }}
                 pageInfo {{
@@ -547,6 +569,50 @@ class LinearTracker(TrackerBase):
             {"input": {"issueId": issue_uuid, "body": body}},
         )
 
+    def get_comments(self, ticket_id: str, limit: int = 20) -> list[dict]:
+        """Fetch comments for a Linear issue.
+
+        Returns list of dicts with keys: author, date, body, is_bot.
+        """
+        issue = self.get_ticket(ticket_id)
+        if not issue:
+            raise RuntimeError(f"Ticket not found: {ticket_id}")
+        issue_uuid = issue.raw.get("id")
+        if not issue_uuid:
+            raise RuntimeError("Cannot fetch comments: issue has no id")
+
+        query = """
+        query GetComments($id: String!, $first: Int!) {
+            issue(id: $id) {
+                comments(first: $first) {
+                    nodes {
+                        body
+                        createdAt
+                        user { name }
+                        botActor { name }
+                    }
+                }
+            }
+        }
+        """
+        result = self._execute_query(query, {"id": issue_uuid, "first": limit})
+        nodes = result.get("data", {}).get("issue", {}).get("comments", {}).get("nodes", [])
+
+        comments = []
+        for node in nodes:
+            is_bot = node.get("botActor") is not None
+            if is_bot:
+                author = f"Bot: {node['botActor'].get('name', 'Unknown')}"
+            else:
+                author = (node.get("user") or {}).get("name", "Unknown")
+            comments.append({
+                "author": author,
+                "date": node.get("createdAt", ""),
+                "body": node.get("body", ""),
+                "is_bot": is_bot,
+            })
+        return comments
+
     def validate_config(self) -> tuple[bool, list[str]]:
         """Validate Linear configuration."""
         issues = []
@@ -868,6 +934,21 @@ class LinearTracker(TrackerBase):
             children_nodes = issue.get("children", {}).get("nodes", [])
             children = [self._parse_issue(child) for child in children_nodes]
 
+        # Parse blocking relationships from relations
+        blocks: list[str] = []
+        blocked_by: list[str] = []
+        relations_nodes = issue.get("relations", {}).get("nodes", [])
+        for rel in relations_nodes:
+            rel_type = rel.get("type", "")
+            related = rel.get("relatedIssue") or {}
+            identifier = related.get("identifier", "")
+            if not identifier:
+                continue
+            if rel_type == "blocks":
+                blocks.append(identifier)
+            elif rel_type == "blocked_by":
+                blocked_by.append(identifier)
+
         return Ticket(
             id=issue.get("identifier", issue.get("id", "")),
             title=issue.get("title", ""),
@@ -884,6 +965,8 @@ class LinearTracker(TrackerBase):
             parent_id=parent.get("identifier"),
             parent_title=parent.get("title"),
             children=children,
+            blocks=blocks,
+            blocked_by=blocked_by,
         )
 
     # -------------------------------------------------------------------------
