@@ -122,7 +122,7 @@ class LinearTracker(TrackerBase):
                 url
                 priority
                 assignee {{ id name email }}
-                project {{ id name }}
+                project {{ id name state }}
                 parent {{ id identifier title }}
                 {children_fragment}
             }}
@@ -182,7 +182,7 @@ class LinearTracker(TrackerBase):
                     url
                     priority
                     assignee {{ name }}
-                    project {{ name }}
+                    project {{ name state }}
                     parent {{ identifier }}
                     {relations_fragment}
                 }}
@@ -320,7 +320,7 @@ class LinearTracker(TrackerBase):
                     url
                     priority
                     assignee { name }
-                    project { id name }
+                    project { id name state }
                     parent { identifier title }
                 }
             }
@@ -513,7 +513,7 @@ class LinearTracker(TrackerBase):
                     url
                     priority
                     assignee { name }
-                    project { id name }
+                    project { id name state }
                     parent { identifier title }
                 }
             }
@@ -880,6 +880,7 @@ class LinearTracker(TrackerBase):
             assignee=assignee.get("name"),
             project=project.get("name"),
             project_id=project.get("id"),
+            project_state=project.get("state"),
             parent_id=parent.get("identifier"),
             parent_title=parent.get("title"),
             children=children,

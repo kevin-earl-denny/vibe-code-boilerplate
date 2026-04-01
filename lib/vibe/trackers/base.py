@@ -33,6 +33,7 @@ class Ticket:
     assignee: str | None = None  # Assignee name
     project: str | None = None  # Project name
     project_id: str | None = None  # Project ID
+    project_state: str | None = None  # Project state (planned, started, completed, canceled)
     parent_id: str | None = None  # Parent ticket identifier
     parent_title: str | None = None  # Parent ticket title
     children: list["Ticket"] = field(default_factory=list)  # Sub-tasks

@@ -1204,6 +1204,92 @@ def batch_create(from_file: str, dry_run: bool) -> None:
     click.echo(f"\nCreated {len(created)}/{len(tickets_data)} tickets.")
 
 
+@batch.command("assign-project")
+@click.option(
+    "--from",
+    "from_file",
+    required=True,
+    type=click.Path(exists=True),
+    help="YAML file with project assignments",
+)
+@click.option("--dry-run", is_flag=True, help="Preview without updating")
+def batch_assign_project(from_file: str, dry_run: bool) -> None:
+    """Assign tickets to projects in bulk from a YAML file.
+
+    Example YAML format:
+
+    \b
+        projects:
+          - name: "Data Pipeline V1"
+            tickets: [DEAL-4, DEAL-61, DEAL-62]
+          - name: "Backend API"
+            tickets: [DEAL-83, DEAL-84, DEAL-85]
+    """
+    try:
+        import yaml
+    except ImportError:
+        click.echo(
+            "PyYAML is required for batch operations. Install with: pip install pyyaml", err=True
+        )
+        sys.exit(1)
+
+    with open(from_file) as f:
+        data = yaml.safe_load(f)
+
+    projects_data = data.get("projects", [])
+    if not projects_data:
+        click.echo("No projects found in YAML file.")
+        return
+
+    # Validate structure
+    total_assignments = 0
+    for proj in projects_data:
+        if "name" not in proj:
+            click.echo("Error: each project entry must have a 'name' field.", err=True)
+            sys.exit(1)
+        tickets = proj.get("tickets", [])
+        if not tickets:
+            click.echo(f"Warning: project \"{proj['name']}\" has no tickets listed.", err=True)
+        total_assignments += len(tickets)
+
+    if dry_run:
+        click.echo(f"DRY RUN — Would assign {total_assignments} tickets across {len(projects_data)} projects:\n")
+        for proj in projects_data:
+            tickets = proj.get("tickets", [])
+            ticket_ids = ", ".join(str(t) for t in tickets)
+            click.echo(f"  {proj['name']}:")
+            click.echo(f"    {ticket_ids}")
+        click.echo("\nNo tickets were updated. Remove --dry-run to apply.")
+        return
+
+    tracker = ensure_tracker_configured()
+
+    if not hasattr(tracker, "create_project"):
+        click.echo("Batch project assignment is only supported for trackers with project support (e.g. Linear).", err=True)
+        sys.exit(1)
+
+    succeeded = 0
+    failed = 0
+
+    for proj in projects_data:
+        project_name = proj["name"]
+        tickets = proj.get("tickets", [])
+        click.echo(f"\nAssigning to project: {project_name}")
+        for ticket_id in tickets:
+            ticket_id_str = str(ticket_id)
+            try:
+                tracker.update_ticket(ticket_id_str, project=project_name)
+                click.echo(f"  ✓ {ticket_id_str}")
+                succeeded += 1
+            except Exception as e:
+                click.echo(f"  ✗ {ticket_id_str}: {e}", err=True)
+                failed += 1
+
+    click.echo(f"\nAssigned {succeeded}/{total_assignments} tickets.")
+    if failed:
+        click.echo(f"{failed} failed.", err=True)
+
+
 def print_ticket(ticket: Ticket, show_children: bool = False) -> None:
     """Print full ticket details."""
     click.echo(f"\n{ticket.id}: {ticket.title}")
@@ -1220,7 +1306,10 @@ def print_ticket(ticket: Ticket, show_children: bool = False) -> None:
     if ticket.assignee:
         click.echo(f"Assignee: {ticket.assignee}")
     if ticket.project:
-        click.echo(f"Project: {ticket.project}")
+        project_str = ticket.project
+        if ticket.project_state:
+            project_str += f" ({ticket.project_state})"
+        click.echo(f"Project: {project_str}")
     if ticket.parent_id:
         parent_str = ticket.parent_id
         if ticket.parent_title:
