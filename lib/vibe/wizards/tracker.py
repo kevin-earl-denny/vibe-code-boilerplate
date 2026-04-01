@@ -128,6 +128,9 @@ def _setup_linear(config: dict[str, Any]) -> bool:
         click.echo("Required: Add LINEAR_API_KEY as a repository secret.")
         click.echo("See: recipes/workflows/pr-opened-linear.md")
 
+    # Offer to sync labels from Linear
+    _try_sync_labels(config, "linear")
+
     return True
 
 
@@ -183,7 +186,63 @@ def _setup_github_issues(config: dict[str, Any]) -> bool:
     click.echo("No API keys needed - gh CLI handles authentication.")
     click.echo("All bin/ticket commands will use GitHub Issues.")
 
+    # Offer to sync labels from GitHub
+    _try_sync_labels(config, "github", repo=repo)
+
     return True
+
+
+def _try_sync_labels(config: dict[str, Any], tracker_type: str, **kwargs: Any) -> None:
+    """Attempt to sync labels from the tracker into the config dict.
+
+    Updates config["labels"] in-place so the caller's save_config() persists
+    the synced labels. This is a best-effort operation — if it fails (no API
+    key yet, network issues, etc.), we skip and let the user sync later.
+    """
+    api_key = os.environ.get("LINEAR_API_KEY") if tracker_type == "linear" else None
+    team_id = config.get("tracker", {}).get("config", {}).get("team_id")
+
+    # For Linear, we need an API key to fetch labels
+    if tracker_type == "linear" and not api_key:
+        click.echo()
+        click.echo("Tip: After adding LINEAR_API_KEY to .env.local, run:")
+        click.echo("  bin/vibe sync-labels")
+        click.echo("to populate config.json with your team's actual labels.")
+        return
+
+    try:
+        from lib.vibe.label_sync import categorize_labels
+
+        if tracker_type == "linear":
+            from lib.vibe.trackers.linear import LinearTracker
+
+            tracker = LinearTracker(api_key=api_key, team_id=team_id)
+        elif tracker_type == "github":
+            from lib.vibe.trackers.github_issues import GitHubIssuesTracker
+
+            tracker = GitHubIssuesTracker(repo=kwargs.get("repo"))
+        else:
+            return
+
+        click.echo()
+        click.echo("Syncing labels from your team...")
+        tracker_labels = tracker.list_labels()
+        existing_labels = config.get("labels", {})
+        new_labels = categorize_labels(tracker_labels, existing_labels)
+
+        # Update config in-place so the wizard's save_config() persists it
+        config["labels"] = new_labels
+
+        if tracker_labels:
+            area_labels = new_labels.get("area", [])
+            click.echo(f"Synced {len(tracker_labels)} labels from {tracker_type}.")
+            if area_labels:
+                click.echo(f"  Area labels: {', '.join(area_labels)}")
+        else:
+            click.echo("No labels found in tracker. Using defaults.")
+    except Exception:  # noqa: BLE001
+        click.echo("Could not sync labels (will use defaults).")
+        click.echo("Run 'bin/vibe sync-labels' later to sync from your tracker.")
 
 
 def _setup_shortcut(config: dict[str, Any]) -> bool:
