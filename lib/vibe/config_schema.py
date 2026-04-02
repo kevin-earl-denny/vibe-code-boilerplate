@@ -72,6 +72,7 @@ KNOWN_KEYS = {
     "observability",
     "testing",
     "boilerplate",
+    "views",
 }
 
 
