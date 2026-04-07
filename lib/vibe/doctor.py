@@ -67,6 +67,7 @@ def run_doctor(
         config = load_config()
         results.append(check_config_schema())
         results.append(check_tracker_config(config))
+        results.append(check_label_sync(config))
         results.append(check_github_config(config))
         results.append(check_secrets_allowlist())
 
@@ -323,6 +324,40 @@ def check_tracker_config(config: dict) -> CheckResult:
         name="Tracker",
         status=Status.WARN,
         message=f"Unknown tracker type: {tracker_type}",
+        category="integration",
+    )
+
+
+def check_label_sync(config: dict) -> CheckResult:
+    """Check whether config labels look like unsynced defaults."""
+    from lib.vibe.config import DEFAULT_CONFIG
+
+    tracker_type = config.get("tracker", {}).get("type")
+    if not tracker_type:
+        return CheckResult(
+            name="Label sync",
+            status=Status.SKIP,
+            message="No tracker configured",
+            category="integration",
+        )
+
+    current_labels = config.get("labels", {})
+    default_labels = DEFAULT_CONFIG.get("labels", {})
+
+    # If area labels are exactly the defaults, they likely haven't been synced
+    if current_labels.get("area") == default_labels.get("area"):
+        return CheckResult(
+            name="Label sync",
+            status=Status.WARN,
+            message="Labels appear to be defaults (not synced from tracker)",
+            fix_hint="Run 'bin/vibe sync-labels' to fetch labels from your tracker",
+            category="integration",
+        )
+
+    return CheckResult(
+        name="Label sync",
+        status=Status.PASS,
+        message="Area labels differ from defaults (likely synced or customized)",
         category="integration",
     )
 

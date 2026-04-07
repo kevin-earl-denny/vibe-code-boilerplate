@@ -12,6 +12,7 @@ import requests
 from lib.vibe.cli.figma import figma
 from lib.vibe.cli.secrets import main as secrets_group
 from lib.vibe.doctor import print_results, run_doctor
+from lib.vibe.trackers.base import TrackerBase
 from lib.vibe.version import bump_version, get_version, write_version
 from lib.vibe.wizards.setup import run_individual_wizard, run_setup
 
@@ -223,6 +224,92 @@ def doctor(verbose: bool, live: bool) -> None:
     """
     results = run_doctor(verbose=verbose, live_checks=live)
     sys.exit(print_results(results))
+
+
+@main.command("sync-labels")
+@click.option("--dry-run", is_flag=True, help="Show what would change without saving")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def sync_labels(dry_run: bool, as_json: bool) -> None:
+    """Sync labels from your ticket tracker into .vibe/config.json.
+
+    Fetches the team's actual labels from Linear (or GitHub/Shortcut) and
+    updates the labels section in config.json. Labels are automatically
+    categorized into type, risk, area, and special buckets.
+
+    Use --dry-run to preview changes without saving.
+    """
+    import json as _json
+
+    from lib.vibe.config import load_config
+    from lib.vibe.label_sync import sync_labels_to_config
+    from lib.vibe.ui.components import Spinner
+
+    config = load_config()
+    tracker_type = config.get("tracker", {}).get("type")
+    tracker_config = config.get("tracker", {}).get("config", {})
+
+    if not tracker_type:
+        click.echo("No tracker configured. Run 'bin/vibe setup -w tracker' first.", err=True)
+        sys.exit(1)
+
+    # Build the tracker instance
+    tracker: TrackerBase
+    if tracker_type == "linear":
+        if not os.environ.get("LINEAR_API_KEY"):
+            click.echo("LINEAR_API_KEY not set. Add it to .env.local first.", err=True)
+            sys.exit(1)
+        from lib.vibe.trackers.linear import LinearTracker
+
+        tracker = LinearTracker(team_id=tracker_config.get("team_id"))
+    elif tracker_type == "github":
+        from lib.vibe.trackers.github_issues import GitHubIssuesTracker
+
+        tracker = GitHubIssuesTracker(repo=tracker_config.get("repo"))
+    elif tracker_type == "shortcut":
+        from lib.vibe.trackers.shortcut import ShortcutTracker
+
+        tracker = ShortcutTracker()
+    else:
+        click.echo(f"Unsupported tracker type: {tracker_type}", err=True)
+        sys.exit(1)
+
+    if not hasattr(tracker, "list_labels"):
+        click.echo(f"Label syncing is not supported by the {tracker_type} tracker.", err=True)
+        sys.exit(1)
+
+    with Spinner(f"Fetching labels from {tracker_type}"):
+        try:
+            result = sync_labels_to_config(tracker, dry_run=dry_run)
+        except Exception as e:
+            click.echo(f"\nFailed to sync labels: {e}", err=True)
+            sys.exit(1)
+
+    if as_json:
+        click.echo(_json.dumps(result, indent=2))
+        return
+
+    count = result["tracker_count"]
+    labels = result["labels"]
+
+    click.echo(f"\nFetched {count} labels from {tracker_type}.")
+    click.echo()
+
+    for category in ["type", "risk", "area", "special"]:
+        items = labels.get(category, [])
+        click.echo(f"  {category.title():8s} ({len(items)}): {', '.join(items)}")
+
+    click.echo()
+
+    if dry_run:
+        if result["changed"]:
+            click.echo("Changes detected (dry run — not saved).")
+            click.echo("Run without --dry-run to apply.")
+        else:
+            click.echo("No changes needed.")
+    elif result["changed"]:
+        click.echo("Labels updated in .vibe/config.json")
+    else:
+        click.echo("Labels already up to date.")
 
 
 @main.command()
