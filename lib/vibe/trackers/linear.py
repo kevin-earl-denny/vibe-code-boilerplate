@@ -135,6 +135,17 @@ class LinearTracker(TrackerBase):
                         }}
                     }}
                 }}
+                inverseRelations(first: 50) {{
+                    nodes {{
+                        id
+                        type
+                        relatedIssue {{
+                            identifier
+                            title
+                            state {{ name }}
+                        }}
+                    }}
+                }}
                 {children_fragment}
             }}
         }}
@@ -196,6 +207,17 @@ class LinearTracker(TrackerBase):
                     project {{ name state }}
                     parent {{ identifier }}
                     relations(first: 50) {{
+                        nodes {{
+                            id
+                            type
+                            relatedIssue {{
+                                identifier
+                                title
+                                state {{ name }}
+                            }}
+                        }}
+                    }}
+                    inverseRelations(first: 50) {{
                         nodes {{
                             id
                             type
@@ -936,11 +958,11 @@ class LinearTracker(TrackerBase):
             children_nodes = issue.get("children", {}).get("nodes", [])
             children = [self._parse_issue(child) for child in children_nodes]
 
-        # Parse blocking relationships from relations
+        # Parse blocking relationships from relations and inverseRelations
         blocks: list[str] = []
         blocked_by: list[str] = []
-        relations_nodes = issue.get("relations", {}).get("nodes", [])
-        for rel in relations_nodes:
+        # Forward relations: if type="blocks", this issue blocks relatedIssue
+        for rel in issue.get("relations", {}).get("nodes", []):
             rel_type = rel.get("type", "")
             related = rel.get("relatedIssue") or {}
             identifier = related.get("identifier", "")
@@ -948,7 +970,14 @@ class LinearTracker(TrackerBase):
                 continue
             if rel_type == "blocks":
                 blocks.append(identifier)
-            elif rel_type == "blocked_by":
+        # Inverse relations: if type="blocks", relatedIssue blocks this issue
+        for rel in issue.get("inverseRelations", {}).get("nodes", []):
+            rel_type = rel.get("type", "")
+            related = rel.get("relatedIssue") or {}
+            identifier = related.get("identifier", "")
+            if not identifier:
+                continue
+            if rel_type == "blocks":
                 blocked_by.append(identifier)
 
         return Ticket(

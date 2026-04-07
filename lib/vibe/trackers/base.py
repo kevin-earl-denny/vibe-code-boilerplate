@@ -39,7 +39,6 @@ class Ticket:
     children: list["Ticket"] = field(default_factory=list)  # Sub-tasks
     blocks: list[str] = field(default_factory=list)  # Ticket IDs this blocks
     blocked_by: list[str] = field(default_factory=list)  # Ticket IDs blocking this
-    comments: list[dict] = field(default_factory=list)  # Loaded on demand
 
 
 class TrackerBase(ABC):
