@@ -726,6 +726,8 @@ def create_human_followup(
 )
 @click.option("--blocked-by", multiple=True, help="Add tickets that block this ticket")
 @click.option("--blocks", multiple=True, help="Add tickets that this ticket blocks")
+@click.option("--remove-blocked-by", multiple=True, help="Remove tickets that block this ticket")
+@click.option("--remove-blocks", multiple=True, help="Remove tickets that this ticket blocks")
 @click.option("--project", "-p", help="Add to project (by name)")
 @click.option("--remove-project", is_flag=True, help="Remove from current project")
 @click.option("--parent", help="Set parent ticket (make sub-task)")
@@ -745,6 +747,8 @@ def update(
     label: tuple,
     blocked_by: tuple,
     blocks: tuple,
+    remove_blocked_by: tuple,
+    remove_blocks: tuple,
     project: str | None,
     remove_project: bool,
     parent: str | None,
@@ -759,6 +763,8 @@ def update(
 
         bin/ticket update PROJ-456 --blocked-by PROJ-123
         bin/ticket update PROJ-456 --blocks PROJ-789
+        bin/ticket update PROJ-456 --remove-blocks PROJ-789
+        bin/ticket update PROJ-456 --remove-blocked-by PROJ-123
         bin/ticket update PROJ-456 --project "Q1 Roadmap"
         bin/ticket update PROJ-456 --parent PROJ-100  # Make sub-task
         bin/ticket update PROJ-456 --no-parent  # Make standalone
@@ -781,12 +787,13 @@ def update(
             unassign,
         ]
     )
-    has_relation_update = any([blocked_by, blocks])
+    has_relation_update = any([blocked_by, blocks, remove_blocked_by, remove_blocks])
 
     if not has_field_update and not has_relation_update:
         click.echo(
             "Specify at least one of: --status, --title, --description, --label, "
-            "--blocked-by, --blocks, --project, --parent, --priority, --assignee",
+            "--blocked-by, --blocks, --remove-blocked-by, --remove-blocks, "
+            "--project, --parent, --priority, --assignee",
             err=True,
         )
         sys.exit(1)
@@ -861,6 +868,32 @@ def update(
             except RuntimeError as e:
                 click.echo(f"  ✗ Failed to create relation: {e}", err=True)
 
+    # Remove blocking relationships if specified
+    if remove_blocked_by or remove_blocks:
+        if blocked_by or blocks:
+            click.echo()
+        # remove-blocked-by: remove "other blocks this" relations
+        for blocker_id in remove_blocked_by:
+            try:
+                tracker.remove_relation(blocker_id, ticket_id, "blocks")
+                click.echo(f"  ✓ Removed: {blocker_id} blocks {ticket_id}")
+            except NotImplementedError:
+                click.echo("This tracker does not support removing relationships", err=True)
+                sys.exit(1)
+            except RuntimeError as e:
+                click.echo(f"  ✗ Failed to remove relation: {e}", err=True)
+
+        # remove-blocks: remove "this blocks other" relations
+        for blocked_id in remove_blocks:
+            try:
+                tracker.remove_relation(ticket_id, blocked_id, "blocks")
+                click.echo(f"  ✓ Removed: {ticket_id} blocks {blocked_id}")
+            except NotImplementedError:
+                click.echo("This tracker does not support removing relationships", err=True)
+                sys.exit(1)
+            except RuntimeError as e:
+                click.echo(f"  ✗ Failed to remove relation: {e}", err=True)
+
 
 @main.command()
 @click.argument("ticket_id")
@@ -930,6 +963,59 @@ def relate(ticket_id: str, blocks: tuple, blocked_by: tuple) -> None:
     click.echo()
     click.echo(
         f"Created {success_count} relation(s)" + (f", {fail_count} failed" if fail_count else "")
+    )
+
+
+@main.command()
+@click.argument("ticket_id")
+@click.option("--blocks", multiple=True, help="Remove 'this blocks other' relationships")
+@click.option("--blocked-by", multiple=True, help="Remove 'other blocks this' relationships")
+def unrelate(ticket_id: str, blocks: tuple, blocked_by: tuple) -> None:
+    """Remove blocking relationships from a ticket.
+
+    Use this command to remove blocking relationships:
+
+        bin/ticket unrelate PROJ-123 --blocks PROJ-456 PROJ-457
+        bin/ticket unrelate PROJ-123 --blocked-by PROJ-100
+    """
+    tracker = ensure_tracker_configured()
+
+    if not blocks and not blocked_by:
+        click.echo("Specify at least one of: --blocks, --blocked-by", err=True)
+        sys.exit(1)
+
+    success_count = 0
+    fail_count = 0
+
+    # Remove "this ticket blocks other" relations
+    for blocked_id in blocks:
+        try:
+            tracker.remove_relation(ticket_id, blocked_id, "blocks")
+            click.echo(f"  ✓ Removed: {ticket_id} blocks {blocked_id}")
+            success_count += 1
+        except NotImplementedError:
+            click.echo("This tracker does not support removing relationships", err=True)
+            sys.exit(1)
+        except RuntimeError as e:
+            click.echo(f"  ✗ {ticket_id} -> {blocked_id}: {e}", err=True)
+            fail_count += 1
+
+    # Remove "other blocks this ticket" relations
+    for blocker_id in blocked_by:
+        try:
+            tracker.remove_relation(blocker_id, ticket_id, "blocks")
+            click.echo(f"  ✓ Removed: {blocker_id} blocks {ticket_id}")
+            success_count += 1
+        except NotImplementedError:
+            click.echo("This tracker does not support removing relationships", err=True)
+            sys.exit(1)
+        except RuntimeError as e:
+            click.echo(f"  ✗ {blocker_id} -> {ticket_id}: {e}", err=True)
+            fail_count += 1
+
+    click.echo()
+    click.echo(
+        f"Removed {success_count} relation(s)" + (f", {fail_count} failed" if fail_count else "")
     )
 
 

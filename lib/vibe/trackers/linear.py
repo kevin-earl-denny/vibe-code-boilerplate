@@ -186,56 +186,50 @@ class LinearTracker(TrackerBase):
             view: Name of a Linear custom view whose filters to apply
             unblocked: If True, exclude tickets that are blocked by other tickets
         """
-        # Include inverseRelations when filtering for unblocked tickets
-        relations_fragment = ""
-        if unblocked:
-            relations_fragment = "inverseRelations { nodes { type } }"
-
-        query = f"""
-        query ListIssues($first: Int!, $after: String, $filter: IssueFilter) {{
-            issues(first: $first, after: $after, filter: $filter) {{
-                nodes {{
+        query = """
+        query ListIssues($first: Int!, $after: String, $filter: IssueFilter) {
+            issues(first: $first, after: $after, filter: $filter) {
+                nodes {
                     id
                     identifier
                     title
                     description
-                    state {{ name }}
-                    labels {{ nodes {{ id name }} }}
+                    state { name }
+                    labels { nodes { id name } }
                     url
                     priority
-                    assignee {{ name }}
-                    project {{ name state }}
-                    parent {{ identifier }}
-                    relations(first: 50) {{
-                        nodes {{
+                    assignee { name }
+                    project { name state }
+                    parent { identifier }
+                    relations(first: 50) {
+                        nodes {
                             id
                             type
-                            relatedIssue {{
+                            relatedIssue {
                                 identifier
                                 title
-                                state {{ name }}
-                            }}
-                        }}
-                    }}
-                    inverseRelations(first: 50) {{
-                        nodes {{
+                                state { name }
+                            }
+                        }
+                    }
+                    inverseRelations(first: 50) {
+                        nodes {
                             id
                             type
-                            relatedIssue {{
+                            relatedIssue {
                                 identifier
                                 title
-                                state {{ name }}
-                            }}
-                        }}
-                    }}
-                    {relations_fragment}
-                }}
-                pageInfo {{
+                                state { name }
+                            }
+                        }
+                    }
+                }
+                pageInfo {
                     hasNextPage
                     endCursor
-                }}
-            }}
-        }}
+                }
+            }
+        }
         """
 
         # Start with view filter if provided
@@ -944,6 +938,67 @@ class LinearTracker(TrackerBase):
             relation_type: Type of relation ("related" or "blocks")
         """
         self.create_relation(ticket_id, related_id, relation_type)
+
+    def remove_relation(
+        self, ticket_id: str, related_id: str, relation_type: str = "blocks"
+    ) -> bool:
+        """Remove a relationship between two Linear issues.
+
+        Finds the relation by matching the related ticket identifier and type,
+        then deletes it using issueRelationDelete.
+
+        Args:
+            ticket_id: The ticket that owns the relation
+            related_id: The related ticket identifier
+            relation_type: Type of relation to remove ("blocks" or "blocked_by")
+
+        Returns:
+            True if the relation was removed successfully
+        """
+        ticket = self.get_ticket(ticket_id)
+        if not ticket:
+            raise RuntimeError(f"Ticket not found: {ticket_id}")
+
+        # Find the relation ID by matching direction + related ticket
+        relation_id = None
+        if relation_type == "blocked_by":
+            candidates = ticket.raw.get("inverseRelations", {}).get("nodes", [])
+            expected_type = "blocks"
+        else:
+            candidates = ticket.raw.get("relations", {}).get("nodes", [])
+            expected_type = relation_type
+
+        for relation in candidates:
+            related = relation.get("relatedIssue") or {}
+            rel_identifier = related.get("identifier", "")
+            rel_type = relation.get("type", "")
+            if rel_identifier == related_id and rel_type == expected_type:
+                relation_id = relation.get("id")
+                break
+
+        if not relation_id:
+            raise RuntimeError(
+                f"No '{relation_type}' relation found between {ticket_id} and {related_id}"
+            )
+
+        mutation = """
+        mutation DeleteIssueRelation($id: String!) {
+            issueRelationDelete(id: $id) {
+                success
+            }
+        }
+        """
+
+        try:
+            result = self._execute_query(mutation, {"id": relation_id})
+            success: bool = (
+                result.get("data", {}).get("issueRelationDelete", {}).get("success", False)
+            )
+            if not success:
+                raise RuntimeError(f"Failed to delete relation {relation_id}")
+            return success
+        except requests.RequestException as e:
+            raise RuntimeError(f"Failed to remove relation: {e}") from e
 
     def _parse_issue(self, issue: dict, include_children: bool = False) -> Ticket:
         """Parse a Linear issue into a Ticket."""

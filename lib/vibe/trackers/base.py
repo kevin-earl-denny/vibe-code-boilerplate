@@ -138,6 +138,25 @@ class TrackerBase(ABC):
         """
         raise NotImplementedError(f"Issue relations are not supported by the {self.name} tracker.")
 
+    def remove_relation(
+        self, ticket_id: str, related_id: str, relation_type: str = "blocks"
+    ) -> bool:
+        """Remove a relationship between two tickets.
+
+        Args:
+            ticket_id: The ticket from which to remove the relation
+            related_id: The related ticket identifier
+            relation_type: Type of relation to remove (e.g. "blocks", "blocked_by")
+
+        Returns:
+            True if the relation was removed successfully
+
+        Override in trackers that support issue relations.
+        """
+        raise NotImplementedError(
+            f"Removing relations is not supported by the {self.name} tracker."
+        )
+
     @abstractmethod
     def validate_config(self) -> tuple[bool, list[str]]:
         """Validate tracker configuration. Returns (is_valid, list of issues)."""
