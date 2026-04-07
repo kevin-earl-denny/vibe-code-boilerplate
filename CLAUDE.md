@@ -415,6 +415,7 @@ When creating tickets programmatically:
 3. **Apply labels** (see [Label checklist](#label-checklist-for-ticket-creation) below)
 4. Include acceptance criteria
 5. Link related tickets with **correct blocking direction** (see [Blocking relationships](#blocking-relationships) below)
+6. **Assign to a project** (if Linear Projects are set up) with `--project "Name"`. See `recipes/tickets/linear-projects.md`.
 
 #### Avoiding Duplicate Tickets
 
@@ -638,6 +639,7 @@ Browse `recipes/` for the full collection. Key recipes:
 - `recipes/architecture/adr-guide.md` — Decision records
 - `recipes/tickets/creating-tickets.md` — Ticket best practices
 - `recipes/tickets/linear-github-integration.md` — Linear + GitHub
+- `recipes/tickets/linear-projects.md` — Linear Projects management
 - `recipes/testing/playwright.md` — E2E testing
 - `recipes/testing/vitest.md` — Unit testing
 - `recipes/debugging/cors-errors.md` — CORS diagnosis

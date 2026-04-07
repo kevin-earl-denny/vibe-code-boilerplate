@@ -1,6 +1,6 @@
 # AI Agent Instructions
 # Format: GitHub Copilot
-# Generated: 2026-02-27
+# Generated: 2026-04-01
 # Source: agent_instructions/
 #
 # DO NOT EDIT DIRECTLY - regenerate with: bin/vibe generate-agent-instructions
@@ -129,6 +129,7 @@ Use these commands for common operations:
 - `bin/ticket project <create|get> "<name>" [OPTIONS]` - Create or get a project.
 - `bin/ticket users [--json]` - List all users in the organization.
 - `bin/ticket batch create --from <yaml-file> [--dry-run]` - Create multiple tickets from a YAML file.
+- `bin/ticket batch assign-project --from <yaml-file> [--dry-run]` - Assign tickets to projects in bulk from a YAML file.
 - `bin/ticket create-human-followup [--parent <ticket-id>] [--files <file>...]` - Create a HUMAN-labeled follow-up ticket for deployment infrastructure that requires human action.
 - `bin/vibe pr` - Create a pull request for the current branch. PR titles must include the ticket reference.
 - `bin/vibe figma analyze` - Analyze frontend codebase for design system context.

@@ -774,3 +774,225 @@ class TestCreateCommandRelatesTo:
         assert "Relates to:  TEST-50" in result.output
         assert "DRY RUN" in result.output
         mock_tracker.create_ticket.assert_not_called()
+
+
+class TestPrintTicketProjectState:
+    """Tests for project state display in print_ticket."""
+
+    def test_print_ticket_with_project_and_state(self, capsys) -> None:
+        ticket = Ticket(
+            id="TEST-50",
+            title="Project Test",
+            description="",
+            status="In Progress",
+            labels=[],
+            url="",
+            raw={},
+            project="Q1 Roadmap",
+            project_state="started",
+        )
+
+        print_ticket(ticket)
+        captured = capsys.readouterr()
+
+        assert "Project: Q1 Roadmap (started)" in captured.out
+
+    def test_print_ticket_with_project_no_state(self, capsys) -> None:
+        ticket = Ticket(
+            id="TEST-51",
+            title="Project No State",
+            description="",
+            status="Todo",
+            labels=[],
+            url="",
+            raw={},
+            project="Backend API",
+            project_state=None,
+        )
+
+        print_ticket(ticket)
+        captured = capsys.readouterr()
+
+        assert "Project: Backend API" in captured.out
+        assert "Project: Backend API (" not in captured.out
+
+    def test_print_ticket_no_project(self, capsys) -> None:
+        ticket = Ticket(
+            id="TEST-52",
+            title="No Project",
+            description="",
+            status="Todo",
+            labels=[],
+            url="",
+            raw={},
+        )
+
+        print_ticket(ticket)
+        captured = capsys.readouterr()
+
+        assert "Project:" not in captured.out
+
+
+try:
+    import yaml as _yaml  # noqa: F401
+
+    _has_yaml = True
+except ImportError:
+    _has_yaml = False
+
+
+@pytest.mark.skipif(not _has_yaml, reason="PyYAML required for batch tests")
+class TestBatchAssignProject:
+    """Tests for batch assign-project command."""
+
+    def test_dry_run(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text(
+            "projects:\n"
+            "  - name: 'Data Pipeline'\n"
+            "    tickets: [DEAL-1, DEAL-2]\n"
+            "  - name: 'Backend API'\n"
+            "    tickets: [DEAL-3]\n"
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["batch", "assign-project", "--from", str(yaml_file), "--dry-run"],
+        )
+
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+        assert "3 tickets across 2 projects" in result.output
+        assert "Data Pipeline" in result.output
+        assert "Backend API" in result.output
+        assert "No tickets were updated" in result.output
+
+    def test_happy_path(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("projects:\n  - name: 'My Project'\n    tickets: [TEST-1, TEST-2]\n")
+
+        runner = CliRunner()
+        mock_tracker = MagicMock()
+        mock_tracker.create_project = True  # hasattr check passes
+
+        with patch("lib.vibe.cli.ticket.ensure_tracker_configured", return_value=mock_tracker):
+            result = runner.invoke(
+                main,
+                ["batch", "assign-project", "--from", str(yaml_file)],
+            )
+
+        assert result.exit_code == 0
+        assert mock_tracker.update_ticket.call_count == 2
+        mock_tracker.update_ticket.assert_any_call("TEST-1", project="My Project")
+        mock_tracker.update_ticket.assert_any_call("TEST-2", project="My Project")
+        assert "Assigned 2/2 tickets" in result.output
+
+    def test_partial_failure(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("projects:\n  - name: 'My Project'\n    tickets: [TEST-1, TEST-2]\n")
+
+        runner = CliRunner()
+        mock_tracker = MagicMock()
+        mock_tracker.create_project = True
+        mock_tracker.update_ticket.side_effect = [None, RuntimeError("Not found")]
+
+        with patch("lib.vibe.cli.ticket.ensure_tracker_configured", return_value=mock_tracker):
+            result = runner.invoke(
+                main,
+                ["batch", "assign-project", "--from", str(yaml_file)],
+            )
+
+        assert result.exit_code != 0
+        assert "Assigned 1/2 tickets" in result.output
+        assert "1 failed" in result.output
+
+    def test_missing_name_field(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("projects:\n  - tickets: [TEST-1]\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["batch", "assign-project", "--from", str(yaml_file)],
+        )
+
+        assert result.exit_code != 0
+        assert "must have a 'name' field" in result.output
+
+    def test_no_projects_in_yaml(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("projects: []\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["batch", "assign-project", "--from", str(yaml_file)],
+        )
+
+        assert result.exit_code == 0
+        assert "No projects found" in result.output
+
+    def test_unsupported_tracker(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("projects:\n  - name: 'My Project'\n    tickets: [TEST-1]\n")
+
+        runner = CliRunner()
+        mock_tracker = MagicMock(spec=[])  # No create_project attribute
+
+        with patch("lib.vibe.cli.ticket.ensure_tracker_configured", return_value=mock_tracker):
+            result = runner.invoke(
+                main,
+                ["batch", "assign-project", "--from", str(yaml_file)],
+            )
+
+        assert result.exit_code != 0
+        assert "only supported for trackers with project support" in result.output
+
+    def test_invalid_yaml_root(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("- just a list\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["batch", "assign-project", "--from", str(yaml_file)],
+        )
+
+        assert result.exit_code != 0
+        assert "YAML root must be a mapping" in result.output
+
+    def test_tickets_not_a_list(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text("projects:\n  - name: 'My Project'\n    tickets: TEST-1\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["batch", "assign-project", "--from", str(yaml_file)],
+        )
+
+        assert result.exit_code != 0
+        assert "must be a list" in result.output
+
+    def test_duplicate_ticket_warning(self, tmp_path) -> None:
+        yaml_file = tmp_path / "projects.yaml"
+        yaml_file.write_text(
+            "projects:\n"
+            "  - name: 'Project A'\n"
+            "    tickets: [TEST-1]\n"
+            "  - name: 'Project B'\n"
+            "    tickets: [TEST-1]\n"
+        )
+
+        runner = CliRunner()
+        mock_tracker = MagicMock()
+        mock_tracker.create_project = True
+
+        with patch("lib.vibe.cli.ticket.ensure_tracker_configured", return_value=mock_tracker):
+            result = runner.invoke(
+                main,
+                ["batch", "assign-project", "--from", str(yaml_file)],
+            )
+
+        assert "appears in multiple projects" in result.output
