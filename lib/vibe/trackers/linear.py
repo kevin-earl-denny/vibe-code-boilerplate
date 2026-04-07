@@ -959,13 +959,20 @@ class LinearTracker(TrackerBase):
         if not ticket:
             raise RuntimeError(f"Ticket not found: {ticket_id}")
 
-        # Find the relation ID by matching type and related ticket
+        # Find the relation ID by matching direction + related ticket
         relation_id = None
-        for relation in ticket.raw.get("relations", {}).get("nodes", []):
+        if relation_type == "blocked_by":
+            candidates = ticket.raw.get("inverseRelations", {}).get("nodes", [])
+            expected_type = "blocks"
+        else:
+            candidates = ticket.raw.get("relations", {}).get("nodes", [])
+            expected_type = relation_type
+
+        for relation in candidates:
             related = relation.get("relatedIssue") or {}
             rel_identifier = related.get("identifier", "")
             rel_type = relation.get("type", "")
-            if rel_identifier == related_id and rel_type == relation_type:
+            if rel_identifier == related_id and rel_type == expected_type:
                 relation_id = relation.get("id")
                 break
 
