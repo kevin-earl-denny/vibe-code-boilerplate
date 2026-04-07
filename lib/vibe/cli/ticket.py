@@ -91,7 +91,8 @@ def main() -> None:
 @main.command()
 @click.argument("ticket_id")
 @click.option("--children", "-c", is_flag=True, help="Include sub-tasks (children)")
-def get(ticket_id: str, children: bool) -> None:
+@click.option("--comments", is_flag=True, help="Show comments on the ticket")
+def get(ticket_id: str, children: bool, comments: bool) -> None:
     """Get details for a specific ticket."""
     tracker = ensure_tracker_configured()
 
@@ -102,11 +103,20 @@ def get(ticket_id: str, children: bool) -> None:
                 ticket = tracker.get_ticket(ticket_id, include_children=True)
             else:
                 ticket = tracker.get_ticket(ticket_id)
-        if ticket:
-            print_ticket(ticket, show_children=children)
-        else:
+        if not ticket:
             click.echo(f"Ticket not found: {ticket_id}")
             sys.exit(1)
+
+        # Fetch comments on demand
+        comment_list: list[dict] = []
+        if comments and hasattr(tracker, "get_comments"):
+            try:
+                with Spinner("Fetching comments"):
+                    comment_list = tracker.get_comments(ticket_id)
+            except (NotImplementedError, RuntimeError):
+                pass
+
+        print_ticket(ticket, show_children=children, comments=comment_list)
     except NotImplementedError as e:
         click.echo(str(e), err=True)
         sys.exit(1)
@@ -258,6 +268,7 @@ def list_views() -> None:
 @click.option("--description", "-d", default="", help="Ticket description (required)")
 @click.option("--label", "-l", multiple=True, help="Labels to add")
 @click.option("--blocked-by", multiple=True, help="Ticket IDs that block this ticket")
+@click.option("--blocks", multiple=True, help="Ticket IDs that this ticket blocks")
 @click.option("--relates-to", multiple=True, help="Related ticket IDs (non-hierarchical)")
 @click.option("--interactive", "-i", is_flag=True, help="Interactive mode with guided prompts")
 @click.option("--project", "-p", help="Add to project (by name)")
@@ -278,6 +289,7 @@ def create(
     description: str,
     label: tuple,
     blocked_by: tuple,
+    blocks: tuple,
     relates_to: tuple,
     interactive: bool,
     project: str | None,
@@ -359,6 +371,10 @@ def create(
             click.echo(f"  Project:     {project}")
         if assignee:
             click.echo(f"  Assignee:    {assignee}")
+        if blocked_by:
+            click.echo(f"  Blocked by:  {', '.join(blocked_by)}")
+        if blocks:
+            click.echo(f"  Blocks:      {', '.join(blocks)}")
         if relates_to:
             click.echo(f"  Relates to:  {', '.join(relates_to)}")
         click.echo("\nNo ticket was created. Remove --dry-run to create.")
@@ -397,12 +413,18 @@ def create(
         click.echo(f"URL: {ticket.url}")
 
         # Set up blocking relationships if specified
-        if blocked_by and hasattr(tracker, "create_relation"):
+        if (blocked_by or blocks) and hasattr(tracker, "create_relation"):
             click.echo()
             for blocker_id in blocked_by:
                 try:
                     tracker.create_relation(blocker_id, ticket.id, "blocks")
                     click.echo(f"  ✓ {blocker_id} blocks {ticket.id}")
+                except RuntimeError as e:
+                    click.echo(f"  ✗ Failed to create relation: {e}", err=True)
+            for blocked_id in blocks:
+                try:
+                    tracker.create_relation(ticket.id, blocked_id, "blocks")
+                    click.echo(f"  ✓ {ticket.id} blocks {blocked_id}")
                 except RuntimeError as e:
                     click.echo(f"  ✗ Failed to create relation: {e}", err=True)
 
@@ -1317,7 +1339,11 @@ def batch_assign_project(from_file: str, dry_run: bool) -> None:
         sys.exit(1)
 
 
-def print_ticket(ticket: Ticket, show_children: bool = False) -> None:
+def print_ticket(
+    ticket: Ticket,
+    show_children: bool = False,
+    comments: list[dict] | None = None,
+) -> None:
     """Print full ticket details."""
     click.echo(f"\n{ticket.id}: {ticket.title}")
     click.echo("-" * 60)
@@ -1343,6 +1369,12 @@ def print_ticket(ticket: Ticket, show_children: bool = False) -> None:
             parent_str += f" ({ticket.parent_title})"
         click.echo(f"Parent: {parent_str}")
 
+    # Blocking relationships
+    if ticket.blocks:
+        click.echo(f"Blocks: {', '.join(ticket.blocks)}")
+    if ticket.blocked_by:
+        click.echo(f"Blocked by: {', '.join(ticket.blocked_by)}")
+
     click.echo(f"URL: {ticket.url}")
 
     if ticket.description:
@@ -1353,6 +1385,19 @@ def print_ticket(ticket: Ticket, show_children: bool = False) -> None:
         click.echo("\nSub-tasks:")
         for child in ticket.children:
             click.echo(f"  - {child.id}: {child.title} ({child.status})")
+
+    # Show comments if provided
+    if comments:
+        click.echo(f"\nComments ({len(comments)}):")
+        for c in comments:
+            date_str = c.get("date", "")[:10]
+            click.echo(f"  {c['author']} ({date_str}):")
+            body = c.get("body", "")
+            if len(body) > 500:
+                body = body[:500] + "..."
+            for line in body.split("\n"):
+                click.echo(f"    {line}")
+            click.echo()
 
     click.echo()
 
@@ -1373,6 +1418,10 @@ def print_ticket_summary(ticket: Ticket) -> None:
         extras.append(f"@{ticket.assignee.split()[0]}")  # First name only
     if ticket.parent_id:
         extras.append(f"↳{ticket.parent_id}")
+    if ticket.blocks:
+        extras.append(f"blocks:{len(ticket.blocks)}")
+    if ticket.blocked_by:
+        extras.append(f"blocked:{len(ticket.blocked_by)}")
 
     extra_str = f" {' '.join(extras)}" if extras else ""
     click.echo(f"  {ticket.id}: {ticket.title} ({ticket.status}){labels}{extra_str}")
