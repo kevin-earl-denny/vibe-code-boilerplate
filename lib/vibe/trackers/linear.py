@@ -186,56 +186,50 @@ class LinearTracker(TrackerBase):
             view: Name of a Linear custom view whose filters to apply
             unblocked: If True, exclude tickets that are blocked by other tickets
         """
-        # Include inverseRelations when filtering for unblocked tickets
-        relations_fragment = ""
-        if unblocked:
-            relations_fragment = "inverseRelations { nodes { type } }"
-
-        query = f"""
-        query ListIssues($first: Int!, $after: String, $filter: IssueFilter) {{
-            issues(first: $first, after: $after, filter: $filter) {{
-                nodes {{
+        query = """
+        query ListIssues($first: Int!, $after: String, $filter: IssueFilter) {
+            issues(first: $first, after: $after, filter: $filter) {
+                nodes {
                     id
                     identifier
                     title
                     description
-                    state {{ name }}
-                    labels {{ nodes {{ id name }} }}
+                    state { name }
+                    labels { nodes { id name } }
                     url
                     priority
-                    assignee {{ name }}
-                    project {{ name state }}
-                    parent {{ identifier }}
-                    relations(first: 50) {{
-                        nodes {{
+                    assignee { name }
+                    project { name state }
+                    parent { identifier }
+                    relations(first: 50) {
+                        nodes {
                             id
                             type
-                            relatedIssue {{
+                            relatedIssue {
                                 identifier
                                 title
-                                state {{ name }}
-                            }}
-                        }}
-                    }}
-                    inverseRelations(first: 50) {{
-                        nodes {{
+                                state { name }
+                            }
+                        }
+                    }
+                    inverseRelations(first: 50) {
+                        nodes {
                             id
                             type
-                            relatedIssue {{
+                            relatedIssue {
                                 identifier
                                 title
-                                state {{ name }}
-                            }}
-                        }}
-                    }}
-                    {relations_fragment}
-                }}
-                pageInfo {{
+                                state { name }
+                            }
+                        }
+                    }
+                }
+                pageInfo {
                     hasNextPage
                     endCursor
-                }}
-            }}
-        }}
+                }
+            }
+        }
         """
 
         # Start with view filter if provided

@@ -365,8 +365,8 @@ class TestListTicketsUnblocked:
         query = mock_query.call_args[0][0]
         assert "inverseRelations" in query
 
-    def test_no_unblocked_excludes_query_fragment(self) -> None:
-        """When unblocked=False, the query should NOT include inverseRelations."""
+    def test_query_always_includes_inverse_relations(self) -> None:
+        """inverseRelations is always included for blocking relationship display."""
         tracker = LinearTracker(api_key="test-fake-key")
         mock_response = {
             "data": {
@@ -381,7 +381,7 @@ class TestListTicketsUnblocked:
             tracker.list_tickets(unblocked=False)
 
         query = mock_query.call_args[0][0]
-        assert "inverseRelations" not in query
+        assert "inverseRelations" in query
 
     def test_unblocked_combined_with_view(self) -> None:
         tracker = LinearTracker(api_key="test-fake-key")
