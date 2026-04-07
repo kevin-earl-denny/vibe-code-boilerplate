@@ -19,7 +19,7 @@ from lib.vibe.deployment_followup import (
     detect_deployment_platforms,
     get_default_human_followup_title,
 )
-from lib.vibe.trackers.base import Ticket, TrackerBase
+from lib.vibe.trackers.base import Ticket
 from lib.vibe.trackers.github_issues import GitHubIssuesTracker
 from lib.vibe.trackers.linear import LinearTracker
 from lib.vibe.trackers.shortcut import ShortcutTracker
@@ -869,20 +869,18 @@ def update(
                 click.echo(f"  ✗ Failed to create relation: {e}", err=True)
 
     # Remove blocking relationships if specified
-    _supports_remove = type(tracker).remove_relation is not TrackerBase.remove_relation
-    if (remove_blocked_by or remove_blocks) and not _supports_remove:
-        click.echo("This tracker does not support removing relationships", err=True)
-        sys.exit(1)
-
-    if (remove_blocked_by or remove_blocks) and _supports_remove:
-        if not has_relation_update or not (blocked_by or blocks):
+    if remove_blocked_by or remove_blocks:
+        if blocked_by or blocks:
             click.echo()
         # remove-blocked-by: remove "other blocks this" relations
         for blocker_id in remove_blocked_by:
             try:
                 tracker.remove_relation(blocker_id, ticket_id, "blocks")
                 click.echo(f"  ✓ Removed: {blocker_id} blocks {ticket_id}")
-            except (RuntimeError, NotImplementedError) as e:
+            except NotImplementedError:
+                click.echo("This tracker does not support removing relationships", err=True)
+                sys.exit(1)
+            except RuntimeError as e:
                 click.echo(f"  ✗ Failed to remove relation: {e}", err=True)
 
         # remove-blocks: remove "this blocks other" relations
@@ -890,7 +888,10 @@ def update(
             try:
                 tracker.remove_relation(ticket_id, blocked_id, "blocks")
                 click.echo(f"  ✓ Removed: {ticket_id} blocks {blocked_id}")
-            except (RuntimeError, NotImplementedError) as e:
+            except NotImplementedError:
+                click.echo("This tracker does not support removing relationships", err=True)
+                sys.exit(1)
+            except RuntimeError as e:
                 click.echo(f"  ✗ Failed to remove relation: {e}", err=True)
 
 
@@ -983,10 +984,6 @@ def unrelate(ticket_id: str, blocks: tuple, blocked_by: tuple) -> None:
         click.echo("Specify at least one of: --blocks, --blocked-by", err=True)
         sys.exit(1)
 
-    if type(tracker).remove_relation is TrackerBase.remove_relation:
-        click.echo("This tracker does not support removing relationships", err=True)
-        sys.exit(1)
-
     success_count = 0
     fail_count = 0
 
@@ -996,7 +993,10 @@ def unrelate(ticket_id: str, blocks: tuple, blocked_by: tuple) -> None:
             tracker.remove_relation(ticket_id, blocked_id, "blocks")
             click.echo(f"  ✓ Removed: {ticket_id} blocks {blocked_id}")
             success_count += 1
-        except (RuntimeError, NotImplementedError) as e:
+        except NotImplementedError:
+            click.echo("This tracker does not support removing relationships", err=True)
+            sys.exit(1)
+        except RuntimeError as e:
             click.echo(f"  ✗ {ticket_id} -> {blocked_id}: {e}", err=True)
             fail_count += 1
 
@@ -1006,7 +1006,10 @@ def unrelate(ticket_id: str, blocks: tuple, blocked_by: tuple) -> None:
             tracker.remove_relation(blocker_id, ticket_id, "blocks")
             click.echo(f"  ✓ Removed: {blocker_id} blocks {ticket_id}")
             success_count += 1
-        except (RuntimeError, NotImplementedError) as e:
+        except NotImplementedError:
+            click.echo("This tracker does not support removing relationships", err=True)
+            sys.exit(1)
+        except RuntimeError as e:
             click.echo(f"  ✗ {blocker_id} -> {ticket_id}: {e}", err=True)
             fail_count += 1
 
