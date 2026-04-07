@@ -6,6 +6,7 @@ from typing import Any
 import click
 
 from lib.vibe.tools import require_interactive
+from lib.vibe.trackers.base import TrackerBase
 from lib.vibe.ui.components import NumberedMenu
 
 
@@ -213,6 +214,7 @@ def _try_sync_labels(config: dict[str, Any], tracker_type: str, **kwargs: Any) -
     try:
         from lib.vibe.label_sync import categorize_labels
 
+        tracker: TrackerBase
         if tracker_type == "linear":
             from lib.vibe.trackers.linear import LinearTracker
 

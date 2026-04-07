@@ -12,6 +12,7 @@ import requests
 from lib.vibe.cli.figma import figma
 from lib.vibe.cli.secrets import main as secrets_group
 from lib.vibe.doctor import print_results, run_doctor
+from lib.vibe.trackers.base import TrackerBase
 from lib.vibe.version import bump_version, get_version, write_version
 from lib.vibe.wizards.setup import run_individual_wizard, run_setup
 
@@ -252,6 +253,7 @@ def sync_labels(dry_run: bool, as_json: bool) -> None:
         sys.exit(1)
 
     # Build the tracker instance
+    tracker: TrackerBase
     if tracker_type == "linear":
         if not os.environ.get("LINEAR_API_KEY"):
             click.echo("LINEAR_API_KEY not set. Add it to .env.local first.", err=True)
