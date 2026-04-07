@@ -1,5 +1,6 @@
 """Linear.app ticket tracker integration."""
 
+import copy
 import logging
 import os
 from typing import Any
@@ -146,6 +147,8 @@ class LinearTracker(TrackerBase):
         priority: str | None = None,
         assignee: str | None = None,
         unassigned: bool = False,
+        view: str | None = None,
+        unblocked: bool = False,
     ) -> list[Ticket]:
         """List tickets with optional filters, with automatic pagination.
 
@@ -158,44 +161,58 @@ class LinearTracker(TrackerBase):
             priority: Filter by priority ("urgent", "high", "medium", "low", "none")
             assignee: Filter by assignee name or "me" for current user
             unassigned: If True, show only unassigned tickets
+            view: Name of a Linear custom view whose filters to apply
+            unblocked: If True, exclude tickets that are blocked by other tickets
         """
-        query = """
-        query ListIssues($first: Int!, $after: String, $filter: IssueFilter) {
-            issues(first: $first, after: $after, filter: $filter) {
-                nodes {
+        # Include inverseRelations when filtering for unblocked tickets
+        relations_fragment = ""
+        if unblocked:
+            relations_fragment = "inverseRelations { nodes { type } }"
+
+        query = f"""
+        query ListIssues($first: Int!, $after: String, $filter: IssueFilter) {{
+            issues(first: $first, after: $after, filter: $filter) {{
+                nodes {{
                     id
                     identifier
                     title
                     description
-                    state { name }
-                    labels { nodes { id name } }
+                    state {{ name }}
+                    labels {{ nodes {{ id name }} }}
                     url
                     priority
-                    assignee { name }
-                    project { name }
-                    parent { identifier }
-                }
-                pageInfo {
+                    assignee {{ name }}
+                    project {{ name }}
+                    parent {{ identifier }}
+                    {relations_fragment}
+                }}
+                pageInfo {{
                     hasNextPage
                     endCursor
-                }
-            }
-        }
+                }}
+            }}
+        }}
         """
+
+        # Start with view filter if provided
         filter_obj: dict[str, Any] = {}
+        if view:
+            filter_obj = self._get_view_filter(view)
+
+        # Always scope to team
         if self._team_id:
             filter_obj["team"] = {"id": {"eq": self._team_id}}
+
+        # Explicit CLI filters override/merge into view filter
         if status:
             filter_obj["state"] = {"name": {"eq": status}}
         if labels:
             filter_obj["labels"] = {"name": {"in": labels}}
         if project:
-            # Need to resolve project name to ID
             project_id = self._get_project_id(project)
             if project_id:
                 filter_obj["project"] = {"id": {"eq": project_id}}
         if parent:
-            # Resolve parent identifier to UUID
             parent_ticket = self.get_ticket(parent)
             if parent_ticket:
                 parent_uuid = parent_ticket.raw.get("id")
@@ -209,19 +226,19 @@ class LinearTracker(TrackerBase):
             filter_obj["assignee"] = {"null": True}
         elif assignee:
             if assignee.lower() == "me":
-                # Use viewer's ID
                 viewer_id = self._get_viewer_id()
                 if viewer_id:
                     filter_obj["assignee"] = {"id": {"eq": viewer_id}}
             else:
-                # Search by name
                 user_id = self._get_user_id_by_name(assignee)
                 if user_id:
                     filter_obj["assignee"] = {"id": {"eq": user_id}}
 
         all_tickets: list[Ticket] = []
         cursor: str | None = None
-        page_size = min(limit, 50)  # Linear max per page is 50
+        # Fetch extra when post-filtering to compensate for excluded tickets
+        fetch_limit = limit * 3 if unblocked else limit
+        page_size = min(fetch_limit, 50)
 
         try:
             while True:
@@ -236,7 +253,10 @@ class LinearTracker(TrackerBase):
                 issues = data.get("nodes", [])
                 page_info = data.get("pageInfo", {})
 
-                all_tickets.extend(self._parse_issue(issue) for issue in issues)
+                for issue in issues:
+                    if unblocked and self._is_blocked(issue):
+                        continue
+                    all_tickets.append(self._parse_issue(issue))
 
                 if len(all_tickets) >= limit:
                     return all_tickets[:limit]
@@ -251,6 +271,15 @@ class LinearTracker(TrackerBase):
             return all_tickets
         except (requests.RequestException, RuntimeError):
             return all_tickets  # Return what we have so far
+
+    @staticmethod
+    def _is_blocked(issue: dict) -> bool:
+        """Check if an issue has incoming blocking relations."""
+        inverse = issue.get("inverseRelations", {})
+        for rel in inverse.get("nodes", []):
+            if rel.get("type") == "blocks":
+                return True
+        return False
 
     def create_ticket(
         self,
@@ -855,6 +884,74 @@ class LinearTracker(TrackerBase):
             parent_title=parent.get("title"),
             children=children,
         )
+
+    # -------------------------------------------------------------------------
+    # Custom Views
+    # -------------------------------------------------------------------------
+
+    def list_views(self) -> list[dict[str, Any]]:
+        """Fetch all custom views from Linear.
+
+        Returns a list of dicts with keys: name, id, filterData, owner.
+        Results are cached for 30 minutes.
+        """
+        cache = get_cache()
+        cache_key = "linear_custom_views"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            result_views: list[dict[str, Any]] = cached
+            return result_views
+
+        query = """
+        query ListCustomViews {
+            customViews {
+                nodes {
+                    id
+                    name
+                    filterData
+                    owner { name }
+                }
+            }
+        }
+        """
+        try:
+            result = self._execute_query(query)
+            nodes = result.get("data", {}).get("customViews", {}).get("nodes", [])
+            views = [
+                {
+                    "id": v.get("id", ""),
+                    "name": v.get("name", ""),
+                    "filterData": v.get("filterData", {}),
+                    "owner": (v.get("owner") or {}).get("name", ""),
+                }
+                for v in nodes
+            ]
+            cache.set(cache_key, views, ttl=1800)
+            return views
+        except (requests.RequestException, RuntimeError) as e:
+            raise RuntimeError(f"Failed to fetch custom views: {e}") from e
+
+    def _get_view_filter(self, view_name: str) -> dict[str, Any]:
+        """Get the filterData for a named custom view.
+
+        Raises RuntimeError if the view is not found or is ambiguous.
+        """
+        views = self.list_views()
+        name_lower = view_name.lower()
+        matches = [v for v in views if v["name"].lower() == name_lower]
+
+        if not matches:
+            available = ", ".join(sorted(v["name"] for v in views)) or "(none)"
+            raise RuntimeError(f"Custom view '{view_name}' not found. Available views: {available}")
+
+        if len(matches) > 1:
+            owners = ", ".join(f"'{m['name']}' (owner: {m['owner']})" for m in matches)
+            raise RuntimeError(
+                f"Multiple views match '{view_name}': {owners}. Use the exact name to disambiguate."
+            )
+
+        filter_data: dict[str, Any] = matches[0].get("filterData", {})
+        return copy.deepcopy(filter_data)
 
     # -------------------------------------------------------------------------
     # Project Management

@@ -633,10 +633,12 @@ class TestLinearTrackerUpdateTicket:
             "description": "Desc",
             "state": {"name": "Todo"},
             "team": {"id": "team_abc"},
-            "labels": {"nodes": [
-                {"id": "existing-label-1", "name": "Feature"},
-                {"id": "existing-label-2", "name": "Frontend"},
-            ]},
+            "labels": {
+                "nodes": [
+                    {"id": "existing-label-1", "name": "Feature"},
+                    {"id": "existing-label-2", "name": "Frontend"},
+                ]
+            },
             "url": "https://linear.app/test/issue/TEST-1",
         }
         mock_updated_issue = {
@@ -645,11 +647,13 @@ class TestLinearTrackerUpdateTicket:
             "title": "Title",
             "description": "Desc",
             "state": {"name": "Todo"},
-            "labels": {"nodes": [
-                {"id": "existing-label-1", "name": "Feature"},
-                {"id": "existing-label-2", "name": "Frontend"},
-                {"id": "new-label-1", "name": "Backend"},
-            ]},
+            "labels": {
+                "nodes": [
+                    {"id": "existing-label-1", "name": "Feature"},
+                    {"id": "existing-label-2", "name": "Frontend"},
+                    {"id": "new-label-1", "name": "Backend"},
+                ]
+            },
             "url": "https://linear.app/test/issue/TEST-1",
         }
         mock_response = {"data": {"issueUpdate": {"success": True, "issue": mock_updated_issue}}}
@@ -657,7 +661,9 @@ class TestLinearTrackerUpdateTicket:
         with patch.object(tracker, "get_ticket") as mock_get:
             mock_get.return_value = tracker._parse_issue(mock_current_issue)
             with patch.object(tracker, "_get_or_create_label_ids", return_value=["new-label-1"]):
-                with patch.object(tracker, "_execute_query", return_value=mock_response) as mock_exec:
+                with patch.object(
+                    tracker, "_execute_query", return_value=mock_response
+                ) as mock_exec:
                     ticket = tracker.update_ticket("TEST-1", labels=["Backend"])
 
         # Verify the mutation was called with merged label IDs
@@ -697,7 +703,9 @@ class TestLinearTrackerUpdateTicket:
         with patch.object(tracker, "get_ticket") as mock_get:
             mock_get.return_value = tracker._parse_issue(mock_current_issue)
             with patch.object(tracker, "_get_or_create_label_ids", return_value=["label-1"]):
-                with patch.object(tracker, "_execute_query", return_value=mock_response) as mock_exec:
+                with patch.object(
+                    tracker, "_execute_query", return_value=mock_response
+                ) as mock_exec:
                     tracker.update_ticket("TEST-1", labels=["Backend"])
 
         # Should only have the one label ID, no duplicates

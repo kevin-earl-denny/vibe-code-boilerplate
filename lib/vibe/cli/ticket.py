@@ -126,6 +126,8 @@ def get(ticket_id: str, children: bool) -> None:
 )
 @click.option("--assignee", "-a", help="Filter by assignee name (or 'me')")
 @click.option("--unassigned", is_flag=True, help="Show only unassigned tickets")
+@click.option("--view", "-V", help="Use a named Linear custom view as filter (Linear only)")
+@click.option("--unblocked", is_flag=True, help="Show only tickets with no blocking dependencies")
 def list_tickets(
     status: str | None,
     label: tuple,
@@ -136,6 +138,8 @@ def list_tickets(
     priority: str | None,
     assignee: str | None,
     unassigned: bool,
+    view: str | None,
+    unblocked: bool,
 ) -> None:
     """List tickets from the tracker.
 
@@ -148,8 +152,17 @@ def list_tickets(
         bin/ticket list --assignee me
         bin/ticket list --unassigned
         bin/ticket list --all  # Fetch all matching tickets
+        bin/ticket list --view "Active"  # Use Linear custom view
+        bin/ticket list --view "Backlog" --unblocked  # Combine view with unblocked filter
     """
     tracker = ensure_tracker_configured()
+
+    # --view and --unblocked require Linear tracker
+    if (view or unblocked) and not isinstance(tracker, LinearTracker):
+        click.echo(
+            "The --view and --unblocked flags are only supported with the Linear tracker.", err=True
+        )
+        sys.exit(1)
 
     effective_limit = 10000 if fetch_all else limit
 
@@ -176,8 +189,15 @@ def list_tickets(
                 kwargs["assignee"] = assignee
             if "unassigned" in params and unassigned:
                 kwargs["unassigned"] = unassigned
+            if "view" in params and view:
+                kwargs["view"] = view
+            if "unblocked" in params and unblocked:
+                kwargs["unblocked"] = unblocked
 
-        with Spinner("Fetching tickets"):
+        spinner_msg = "Fetching tickets"
+        if view:
+            spinner_msg = f"Fetching tickets (view: {view})"
+        with Spinner(spinner_msg):
             tickets = tracker.list_tickets(**kwargs)
 
         if not tickets:
@@ -192,7 +212,43 @@ def list_tickets(
             click.echo(f"\nShowing {count} tickets. Use --all to fetch all matching tickets.")
         else:
             click.echo(f"\n{count} ticket(s) found.")
+    except RuntimeError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except NotImplementedError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+
+@main.command("views")
+def list_views() -> None:
+    """List available Linear custom views.
+
+    Shows all custom views that can be used with 'bin/ticket list --view NAME'.
+    Only supported with the Linear tracker.
+    """
+    tracker = ensure_tracker_configured()
+
+    if not isinstance(tracker, LinearTracker):
+        click.echo("The 'views' command is only supported with the Linear tracker.", err=True)
+        sys.exit(1)
+
+    try:
+        with Spinner("Fetching custom views"):
+            views = tracker.list_views()
+
+        if not views:
+            click.echo("No custom views found.")
+            return
+
+        for v in views:
+            owner = v.get("owner", "")
+            owner_str = f" (owner: {owner})" if owner else ""
+            click.echo(f"  {v['name']}{owner_str}")
+
+        click.echo(f"\n{len(views)} view(s) found.")
+        click.echo('Use: bin/ticket list --view "<name>" to apply a view\'s filters.')
+    except RuntimeError as e:
         click.echo(str(e), err=True)
         sys.exit(1)
 
