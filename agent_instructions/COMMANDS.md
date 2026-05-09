@@ -178,6 +178,13 @@ Create multiple tickets from a YAML file.
 - `bin/ticket batch create --from tickets.yaml`
 - `bin/ticket batch create --from tickets.yaml --dry-run`
 
+### ticket batch assign-project
+Assign tickets to projects in bulk from a YAML file.
+**Usage**: `bin/ticket batch assign-project --from <yaml-file> [--dry-run]`
+**Examples:**
+- `bin/ticket batch assign-project --from project-assignments.yaml`
+- `bin/ticket batch assign-project --from project-assignments.yaml --dry-run`
+
 ### ticket create-human-followup
 Create a HUMAN-labeled follow-up ticket for deployment infrastructure that requires human action.
 **Usage**: `bin/ticket create-human-followup [--parent <ticket-id>] [--files <file>...]`

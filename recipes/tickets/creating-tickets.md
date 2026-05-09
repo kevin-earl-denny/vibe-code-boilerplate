@@ -91,6 +91,7 @@ When creating a ticket, before saving:
 - [ ] Area label(s) assigned (Frontend / Backend / Infra / Docs)
 - [ ] Blocking relationships point the right way (prerequisite blocks dependent)
 - [ ] **Priority (Linear only):** If the ticket has a priority, set the **Priority field** (not a label). See [Priority field](#5-priority-field-linear) below.
+- [ ] **Project (if applicable):** If Linear Projects are set up, assign the ticket to the appropriate project with `--project "Name"`. See `recipes/tickets/linear-projects.md`.
 
 ---
 
@@ -151,5 +152,6 @@ If you use the Linear API to create issues, pass `priority` in the issue input (
 | Set **Priority field** in Linear (Urgent/High/Medium/Low) | Use P0/P1/P2/P3 as **labels** |
 | Use "Milestone" label for epic-style work | Rely only on priority labels without type/risk/area |
 | Verb + Object titles | Vague titles like "Fix stuff" |
+| Assign to a project when projects are set up | Leave tickets unassigned to a project |
 
-See also: `CLAUDE.md` (Ticket Management, Creating Tickets, Label Documentation), `recipes/tickets/linear-setup.md`, `recipes/tickets/shortcut.md`.
+See also: `CLAUDE.md` (Ticket Management, Creating Tickets, Label Documentation), `recipes/tickets/linear-setup.md`, `recipes/tickets/shortcut.md`, `recipes/tickets/linear-projects.md`.

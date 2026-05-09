@@ -57,3 +57,13 @@ Key files to be aware of:
 - `.vibe/config.json` - Project configuration
 - `README.md` - Project documentation
 - `.env.example` - Environment variable template
+
+## Linear Projects
+
+Fill this in when Linear Projects are set up for your project (see `recipes/tickets/linear-projects.md`):
+
+| Project | State | Description |
+|---------|-------|-------------|
+| *(add projects here)* | | |
+
+When creating tickets, assign to the appropriate project with `--project "Name"`.
