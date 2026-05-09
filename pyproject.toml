@@ -36,7 +36,7 @@ fly = [
 ]
 # Optional: YAML support for batch ticket operations
 batch = [
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]
