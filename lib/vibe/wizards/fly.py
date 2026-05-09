@@ -12,12 +12,12 @@ from lib.vibe.tools import require_interactive
 try:
     import tomli
 except ImportError:
-    tomli = None
+    tomli = None  # type: ignore[assignment]
 
 try:
     import tomli_w
 except ImportError:
-    tomli_w = None
+    tomli_w = None  # type: ignore[assignment]
 
 
 def _detect_fly_command() -> str | None:
