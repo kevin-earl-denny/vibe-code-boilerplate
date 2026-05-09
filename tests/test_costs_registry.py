@@ -102,10 +102,11 @@ class TestLoadProvider:
     def test_unknown_provider(self):
         assert load_provider("nonexistent") is None
 
-    def test_known_provider_import_error(self):
-        # Provider is registered but module doesn't exist yet
+    def test_known_provider_loads(self):
+        # Provider is registered and module exists
         result = load_provider("vercel")
-        assert result is None  # ImportError is caught
+        assert result is not None
+        assert result.name == "vercel"
 
 
 class TestCacheOperations:
@@ -150,7 +151,9 @@ class TestCacheOperations:
 
 
 class TestGetAllProviders:
-    def test_returns_empty_when_no_providers_loadable(self):
-        # All providers will fail to import since they don't exist yet
+    def test_loads_enabled_providers(self):
+        # Should load providers that are enabled in config
         providers = get_all_providers(SAMPLE_CONFIG)
-        assert providers == []
+        names = [p.name for p in providers]
+        assert "vercel" in names
+        assert "neon" in names
