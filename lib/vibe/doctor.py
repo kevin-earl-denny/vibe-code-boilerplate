@@ -77,6 +77,9 @@ def run_doctor(
         # Infrastructure readiness (helpful guidance)
         results.extend(check_infrastructure_readiness(config))
 
+        # Cost tracking check
+        results.append(check_cost_tracking(config))
+
         # Integration freshness check
         results.append(check_integration_freshness())
 
@@ -873,6 +876,53 @@ def check_infrastructure_readiness(config: dict) -> list[CheckResult]:
         )
 
     return results
+
+
+def check_cost_tracking(config: dict) -> CheckResult:
+    """Check cost tracking configuration."""
+    ct = config.get("cost_tracking", {})
+
+    if not ct.get("enabled"):
+        return CheckResult(
+            name="Cost tracking",
+            status=Status.SKIP,
+            message="Not enabled (optional)",
+            fix_hint="Run 'bin/vibe setup --wizard cost-tracking' to configure",
+            category="integration",
+        )
+
+    providers = ct.get("providers", {})
+    enabled = [
+        name
+        for name, cfg in providers.items()
+        if name != "manual" and isinstance(cfg, dict) and cfg.get("enabled")
+    ]
+
+    if not enabled:
+        return CheckResult(
+            name="Cost tracking",
+            status=Status.WARN,
+            message="Enabled but no providers configured",
+            fix_hint="Run 'bin/vibe setup --wizard cost-tracking' to add providers",
+            category="integration",
+        )
+
+    budget = ct.get("budget_monthly", 0)
+    if not budget:
+        return CheckResult(
+            name="Cost tracking",
+            status=Status.WARN,
+            message=f"{len(enabled)} provider(s) configured, no budget set",
+            fix_hint="Set budget_monthly in .vibe/config.json cost_tracking section",
+            category="integration",
+        )
+
+    return CheckResult(
+        name="Cost tracking",
+        status=Status.PASS,
+        message=f"{len(enabled)} provider(s), budget ${budget:,.0f}/mo",
+        category="integration",
+    )
 
 
 def check_integration_freshness() -> CheckResult:

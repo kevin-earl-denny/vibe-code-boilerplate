@@ -17,6 +17,7 @@ from lib.vibe.ui.components import (
 )
 from lib.vibe.ui.context import WizardContext
 from lib.vibe.wizards.branch import run_branch_wizard
+from lib.vibe.wizards.costs import run_costs_wizard
 from lib.vibe.wizards.database import run_database_wizard
 from lib.vibe.wizards.env import run_env_wizard
 from lib.vibe.wizards.fly import run_fly_wizard
@@ -433,6 +434,7 @@ def run_individual_wizard(wizard_name: str, show_what_next: bool = True) -> bool
         "database": run_database_wizard,
         "sentry": run_sentry_wizard,
         "playwright": run_playwright_wizard,
+        "cost-tracking": run_costs_wizard,
     }
 
     if wizard_name not in wizards:

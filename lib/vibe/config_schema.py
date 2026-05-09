@@ -20,7 +20,10 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "tracker": {
             "type": "object",
             "properties": {
-                "type": {"type": ["string", "null"], "enum": ["linear", "shortcut", None]},
+                "type": {
+                    "type": ["string", "null"],
+                    "enum": ["linear", "shortcut", "github", None],
+                },
                 "config": {"type": "object"},
             },
         },
@@ -72,6 +75,7 @@ KNOWN_KEYS = {
     "observability",
     "testing",
     "boilerplate",
+    "cost_tracking",
     "views",
 }
 
@@ -93,9 +97,10 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     # Validate tracker type
     tracker = config.get("tracker", {})
     tracker_type = tracker.get("type")
-    if tracker_type is not None and tracker_type not in ("linear", "shortcut"):
+    if tracker_type is not None and tracker_type not in ("linear", "shortcut", "github"):
         errors.append(
-            f"Invalid tracker type: '{tracker_type}'. Must be 'linear', 'shortcut', or null."
+            f"Invalid tracker type: '{tracker_type}'. "
+            "Must be 'linear', 'shortcut', 'github', or null."
         )
 
     # Validate github config

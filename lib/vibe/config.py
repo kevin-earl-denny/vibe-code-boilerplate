@@ -51,6 +51,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "components_path": "src/components",
         "design_tokens_path": None,
     },
+    "cost_tracking": {
+        "enabled": False,
+        "budget_monthly": 0,
+        "alert_threshold_pct": 80,
+        "providers": {},
+    },
 }
 
 

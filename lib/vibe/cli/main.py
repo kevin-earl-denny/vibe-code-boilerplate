@@ -9,6 +9,7 @@ from pathlib import Path
 import click
 import requests
 
+from lib.vibe.cli.costs import main as costs_group
 from lib.vibe.cli.figma import figma
 from lib.vibe.cli.secrets import main as secrets_group
 from lib.vibe.doctor import print_results, run_doctor
@@ -193,7 +194,7 @@ def update(skip: bool, force: bool) -> None:
 @click.option(
     "--wizard",
     "-w",
-    help="Run a specific wizard (github, tracker, branch, env, vercel, fly, supabase, neon, database, sentry, playwright)",
+    help="Run a specific wizard (github, tracker, branch, env, vercel, fly, supabase, neon, database, sentry, playwright, cost-tracking)",
 )
 @click.option("--quick", "-q", is_flag=True, help="Quick setup with sensible defaults, no prompts")
 def setup(force: bool, wizard: str | None, quick: bool) -> None:
@@ -1520,6 +1521,9 @@ def cache_status() -> None:
 
 # Register figma command group
 main.add_command(figma)
+
+# Register costs command group
+main.add_command(costs_group, "costs")
 
 
 if __name__ == "__main__":
