@@ -23,7 +23,7 @@ jobs:
 
       - name: Check ticket reference
         id: ticket
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const title = context.payload.pull_request.title;
@@ -62,7 +62,7 @@ jobs:
 
       - name: Check risk label
         id: risk
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const labels = context.payload.pull_request.labels.map(l => l.name);
@@ -81,7 +81,7 @@ jobs:
 
       - name: Warn on high risk without tests
         if: steps.risk.outputs.risk_level == 'High Risk'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: files } = await github.rest.pulls.listFiles({
@@ -103,7 +103,7 @@ jobs:
             }
 
       - name: Check branch naming
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const branch = context.payload.pull_request.head.ref;
@@ -139,7 +139,7 @@ jobs:
 
       - name: Post summary comment
         if: always()
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const hasTicket = '${{ steps.ticket.outputs.has_ticket }}' === 'true';

@@ -76,6 +76,7 @@ KNOWN_KEYS = {
     "testing",
     "boilerplate",
     "cost_tracking",
+    "views",
 }
 
 

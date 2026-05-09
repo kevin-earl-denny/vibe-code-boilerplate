@@ -1,6 +1,6 @@
 # AI Agent Instructions
 # Format: Cursor IDE
-# Generated: 2026-02-27
+# Generated: 2026-04-01
 # Source: agent_instructions/
 #
 # DO NOT EDIT DIRECTLY - regenerate with: bin/vibe generate-agent-instructions
@@ -70,6 +70,7 @@ Do not: Creating related tickets without parent/child or blocking relationships
 # ticket project: bin/ticket project <create|get> "<name>" [OPTIONS]
 # ticket users: bin/ticket users [--json]
 # ticket batch create: bin/ticket batch create --from <yaml-file> [--dry-run]
+# ticket batch assign-project: bin/ticket batch assign-project --from <yaml-file> [--dry-run]
 # ticket create-human-followup: bin/ticket create-human-followup [--parent <ticket-id>] [--files <file>...]
 # pr: bin/vibe pr
 # figma analyze: bin/vibe figma analyze

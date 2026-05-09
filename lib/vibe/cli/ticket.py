@@ -91,7 +91,8 @@ def main() -> None:
 @main.command()
 @click.argument("ticket_id")
 @click.option("--children", "-c", is_flag=True, help="Include sub-tasks (children)")
-def get(ticket_id: str, children: bool) -> None:
+@click.option("--comments", is_flag=True, help="Show comments on the ticket")
+def get(ticket_id: str, children: bool, comments: bool) -> None:
     """Get details for a specific ticket."""
     tracker = ensure_tracker_configured()
 
@@ -102,11 +103,20 @@ def get(ticket_id: str, children: bool) -> None:
                 ticket = tracker.get_ticket(ticket_id, include_children=True)
             else:
                 ticket = tracker.get_ticket(ticket_id)
-        if ticket:
-            print_ticket(ticket, show_children=children)
-        else:
+        if not ticket:
             click.echo(f"Ticket not found: {ticket_id}")
             sys.exit(1)
+
+        # Fetch comments on demand
+        comment_list: list[dict] = []
+        if comments and hasattr(tracker, "get_comments"):
+            try:
+                with Spinner("Fetching comments"):
+                    comment_list = tracker.get_comments(ticket_id)
+            except (NotImplementedError, RuntimeError):
+                pass
+
+        print_ticket(ticket, show_children=children, comments=comment_list)
     except NotImplementedError as e:
         click.echo(str(e), err=True)
         sys.exit(1)
@@ -126,6 +136,8 @@ def get(ticket_id: str, children: bool) -> None:
 )
 @click.option("--assignee", "-a", help="Filter by assignee name (or 'me')")
 @click.option("--unassigned", is_flag=True, help="Show only unassigned tickets")
+@click.option("--view", "-V", help="Use a named Linear custom view as filter (Linear only)")
+@click.option("--unblocked", is_flag=True, help="Show only tickets with no blocking dependencies")
 def list_tickets(
     status: str | None,
     label: tuple,
@@ -136,6 +148,8 @@ def list_tickets(
     priority: str | None,
     assignee: str | None,
     unassigned: bool,
+    view: str | None,
+    unblocked: bool,
 ) -> None:
     """List tickets from the tracker.
 
@@ -148,8 +162,17 @@ def list_tickets(
         bin/ticket list --assignee me
         bin/ticket list --unassigned
         bin/ticket list --all  # Fetch all matching tickets
+        bin/ticket list --view "Active"  # Use Linear custom view
+        bin/ticket list --view "Backlog" --unblocked  # Combine view with unblocked filter
     """
     tracker = ensure_tracker_configured()
+
+    # --view and --unblocked require Linear tracker
+    if (view or unblocked) and not isinstance(tracker, LinearTracker):
+        click.echo(
+            "The --view and --unblocked flags are only supported with the Linear tracker.", err=True
+        )
+        sys.exit(1)
 
     effective_limit = 10000 if fetch_all else limit
 
@@ -176,8 +199,15 @@ def list_tickets(
                 kwargs["assignee"] = assignee
             if "unassigned" in params and unassigned:
                 kwargs["unassigned"] = unassigned
+            if "view" in params and view:
+                kwargs["view"] = view
+            if "unblocked" in params and unblocked:
+                kwargs["unblocked"] = unblocked
 
-        with Spinner("Fetching tickets"):
+        spinner_msg = "Fetching tickets"
+        if view:
+            spinner_msg = f"Fetching tickets (view: {view})"
+        with Spinner(spinner_msg):
             tickets = tracker.list_tickets(**kwargs)
 
         if not tickets:
@@ -192,7 +222,43 @@ def list_tickets(
             click.echo(f"\nShowing {count} tickets. Use --all to fetch all matching tickets.")
         else:
             click.echo(f"\n{count} ticket(s) found.")
+    except RuntimeError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except NotImplementedError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+
+@main.command("views")
+def list_views() -> None:
+    """List available Linear custom views.
+
+    Shows all custom views that can be used with 'bin/ticket list --view NAME'.
+    Only supported with the Linear tracker.
+    """
+    tracker = ensure_tracker_configured()
+
+    if not isinstance(tracker, LinearTracker):
+        click.echo("The 'views' command is only supported with the Linear tracker.", err=True)
+        sys.exit(1)
+
+    try:
+        with Spinner("Fetching custom views"):
+            views = tracker.list_views()
+
+        if not views:
+            click.echo("No custom views found.")
+            return
+
+        for v in views:
+            owner = v.get("owner", "")
+            owner_str = f" (owner: {owner})" if owner else ""
+            click.echo(f"  {v['name']}{owner_str}")
+
+        click.echo(f"\n{len(views)} view(s) found.")
+        click.echo('Use: bin/ticket list --view "<name>" to apply a view\'s filters.')
+    except RuntimeError as e:
         click.echo(str(e), err=True)
         sys.exit(1)
 
@@ -202,6 +268,7 @@ def list_tickets(
 @click.option("--description", "-d", default="", help="Ticket description (required)")
 @click.option("--label", "-l", multiple=True, help="Labels to add")
 @click.option("--blocked-by", multiple=True, help="Ticket IDs that block this ticket")
+@click.option("--blocks", multiple=True, help="Ticket IDs that this ticket blocks")
 @click.option("--relates-to", multiple=True, help="Related ticket IDs (non-hierarchical)")
 @click.option("--interactive", "-i", is_flag=True, help="Interactive mode with guided prompts")
 @click.option("--project", "-p", help="Add to project (by name)")
@@ -222,6 +289,7 @@ def create(
     description: str,
     label: tuple,
     blocked_by: tuple,
+    blocks: tuple,
     relates_to: tuple,
     interactive: bool,
     project: str | None,
@@ -303,6 +371,10 @@ def create(
             click.echo(f"  Project:     {project}")
         if assignee:
             click.echo(f"  Assignee:    {assignee}")
+        if blocked_by:
+            click.echo(f"  Blocked by:  {', '.join(blocked_by)}")
+        if blocks:
+            click.echo(f"  Blocks:      {', '.join(blocks)}")
         if relates_to:
             click.echo(f"  Relates to:  {', '.join(relates_to)}")
         click.echo("\nNo ticket was created. Remove --dry-run to create.")
@@ -341,12 +413,18 @@ def create(
         click.echo(f"URL: {ticket.url}")
 
         # Set up blocking relationships if specified
-        if blocked_by and hasattr(tracker, "create_relation"):
+        if (blocked_by or blocks) and hasattr(tracker, "create_relation"):
             click.echo()
             for blocker_id in blocked_by:
                 try:
                     tracker.create_relation(blocker_id, ticket.id, "blocks")
                     click.echo(f"  ✓ {blocker_id} blocks {ticket.id}")
+                except RuntimeError as e:
+                    click.echo(f"  ✗ Failed to create relation: {e}", err=True)
+            for blocked_id in blocks:
+                try:
+                    tracker.create_relation(ticket.id, blocked_id, "blocks")
+                    click.echo(f"  ✓ {ticket.id} blocks {blocked_id}")
                 except RuntimeError as e:
                     click.echo(f"  ✗ Failed to create relation: {e}", err=True)
 
@@ -644,10 +722,12 @@ def create_human_followup(
     "--label",
     "-l",
     multiple=True,
-    help="Set labels (replaces existing for trackers that support it)",
+    help="Add labels (merged with existing labels)",
 )
 @click.option("--blocked-by", multiple=True, help="Add tickets that block this ticket")
 @click.option("--blocks", multiple=True, help="Add tickets that this ticket blocks")
+@click.option("--remove-blocked-by", multiple=True, help="Remove tickets that block this ticket")
+@click.option("--remove-blocks", multiple=True, help="Remove tickets that this ticket blocks")
 @click.option("--project", "-p", help="Add to project (by name)")
 @click.option("--remove-project", is_flag=True, help="Remove from current project")
 @click.option("--parent", help="Set parent ticket (make sub-task)")
@@ -667,6 +747,8 @@ def update(
     label: tuple,
     blocked_by: tuple,
     blocks: tuple,
+    remove_blocked_by: tuple,
+    remove_blocks: tuple,
     project: str | None,
     remove_project: bool,
     parent: str | None,
@@ -681,6 +763,8 @@ def update(
 
         bin/ticket update PROJ-456 --blocked-by PROJ-123
         bin/ticket update PROJ-456 --blocks PROJ-789
+        bin/ticket update PROJ-456 --remove-blocks PROJ-789
+        bin/ticket update PROJ-456 --remove-blocked-by PROJ-123
         bin/ticket update PROJ-456 --project "Q1 Roadmap"
         bin/ticket update PROJ-456 --parent PROJ-100  # Make sub-task
         bin/ticket update PROJ-456 --no-parent  # Make standalone
@@ -703,12 +787,13 @@ def update(
             unassign,
         ]
     )
-    has_relation_update = any([blocked_by, blocks])
+    has_relation_update = any([blocked_by, blocks, remove_blocked_by, remove_blocks])
 
     if not has_field_update and not has_relation_update:
         click.echo(
             "Specify at least one of: --status, --title, --description, --label, "
-            "--blocked-by, --blocks, --project, --parent, --priority, --assignee",
+            "--blocked-by, --blocks, --remove-blocked-by, --remove-blocks, "
+            "--project, --parent, --priority, --assignee",
             err=True,
         )
         sys.exit(1)
@@ -783,6 +868,32 @@ def update(
             except RuntimeError as e:
                 click.echo(f"  ✗ Failed to create relation: {e}", err=True)
 
+    # Remove blocking relationships if specified
+    if remove_blocked_by or remove_blocks:
+        if blocked_by or blocks:
+            click.echo()
+        # remove-blocked-by: remove "other blocks this" relations
+        for blocker_id in remove_blocked_by:
+            try:
+                tracker.remove_relation(blocker_id, ticket_id, "blocks")
+                click.echo(f"  ✓ Removed: {blocker_id} blocks {ticket_id}")
+            except NotImplementedError:
+                click.echo("This tracker does not support removing relationships", err=True)
+                sys.exit(1)
+            except RuntimeError as e:
+                click.echo(f"  ✗ Failed to remove relation: {e}", err=True)
+
+        # remove-blocks: remove "this blocks other" relations
+        for blocked_id in remove_blocks:
+            try:
+                tracker.remove_relation(ticket_id, blocked_id, "blocks")
+                click.echo(f"  ✓ Removed: {ticket_id} blocks {blocked_id}")
+            except NotImplementedError:
+                click.echo("This tracker does not support removing relationships", err=True)
+                sys.exit(1)
+            except RuntimeError as e:
+                click.echo(f"  ✗ Failed to remove relation: {e}", err=True)
+
 
 @main.command()
 @click.argument("ticket_id")
@@ -852,6 +963,59 @@ def relate(ticket_id: str, blocks: tuple, blocked_by: tuple) -> None:
     click.echo()
     click.echo(
         f"Created {success_count} relation(s)" + (f", {fail_count} failed" if fail_count else "")
+    )
+
+
+@main.command()
+@click.argument("ticket_id")
+@click.option("--blocks", multiple=True, help="Remove 'this blocks other' relationships")
+@click.option("--blocked-by", multiple=True, help="Remove 'other blocks this' relationships")
+def unrelate(ticket_id: str, blocks: tuple, blocked_by: tuple) -> None:
+    """Remove blocking relationships from a ticket.
+
+    Use this command to remove blocking relationships:
+
+        bin/ticket unrelate PROJ-123 --blocks PROJ-456 PROJ-457
+        bin/ticket unrelate PROJ-123 --blocked-by PROJ-100
+    """
+    tracker = ensure_tracker_configured()
+
+    if not blocks and not blocked_by:
+        click.echo("Specify at least one of: --blocks, --blocked-by", err=True)
+        sys.exit(1)
+
+    success_count = 0
+    fail_count = 0
+
+    # Remove "this ticket blocks other" relations
+    for blocked_id in blocks:
+        try:
+            tracker.remove_relation(ticket_id, blocked_id, "blocks")
+            click.echo(f"  ✓ Removed: {ticket_id} blocks {blocked_id}")
+            success_count += 1
+        except NotImplementedError:
+            click.echo("This tracker does not support removing relationships", err=True)
+            sys.exit(1)
+        except RuntimeError as e:
+            click.echo(f"  ✗ {ticket_id} -> {blocked_id}: {e}", err=True)
+            fail_count += 1
+
+    # Remove "other blocks this ticket" relations
+    for blocker_id in blocked_by:
+        try:
+            tracker.remove_relation(blocker_id, ticket_id, "blocks")
+            click.echo(f"  ✓ Removed: {blocker_id} blocks {ticket_id}")
+            success_count += 1
+        except NotImplementedError:
+            click.echo("This tracker does not support removing relationships", err=True)
+            sys.exit(1)
+        except RuntimeError as e:
+            click.echo(f"  ✗ {blocker_id} -> {ticket_id}: {e}", err=True)
+            fail_count += 1
+
+    click.echo()
+    click.echo(
+        f"Removed {success_count} relation(s)" + (f", {fail_count} failed" if fail_count else "")
     )
 
 
@@ -1148,7 +1312,124 @@ def batch_create(from_file: str, dry_run: bool) -> None:
     click.echo(f"\nCreated {len(created)}/{len(tickets_data)} tickets.")
 
 
-def print_ticket(ticket: Ticket, show_children: bool = False) -> None:
+@batch.command("assign-project")
+@click.option(
+    "--from",
+    "from_file",
+    required=True,
+    type=click.Path(exists=True),
+    help="YAML file with project assignments",
+)
+@click.option("--dry-run", is_flag=True, help="Preview without updating")
+def batch_assign_project(from_file: str, dry_run: bool) -> None:
+    """Assign tickets to projects in bulk from a YAML file.
+
+    Example YAML format:
+
+    \b
+        projects:
+          - name: "Data Pipeline V1"
+            tickets: [DEAL-4, DEAL-61, DEAL-62]
+          - name: "Backend API"
+            tickets: [DEAL-83, DEAL-84, DEAL-85]
+    """
+    try:
+        import yaml
+    except ImportError:
+        click.echo(
+            "PyYAML is required for batch operations. Install with: pip install pyyaml", err=True
+        )
+        sys.exit(1)
+
+    with open(from_file) as f:
+        data = yaml.safe_load(f)
+
+    if not isinstance(data, dict):
+        click.echo("Error: YAML root must be a mapping with a 'projects' key.", err=True)
+        sys.exit(1)
+
+    projects_data = data.get("projects", [])
+    if not projects_data:
+        click.echo("No projects found in YAML file.")
+        return
+
+    # Validate structure
+    total_assignments = 0
+    seen_tickets: set[str] = set()
+    for proj in projects_data:
+        if not isinstance(proj, dict):
+            click.echo(
+                "Error: each project entry must be a mapping with 'name' and 'tickets'.", err=True
+            )
+            sys.exit(1)
+        if "name" not in proj:
+            click.echo("Error: each project entry must have a 'name' field.", err=True)
+            sys.exit(1)
+        tickets = proj.get("tickets", [])
+        if not isinstance(tickets, list):
+            click.echo(
+                f'Error: "tickets" for project "{proj["name"]}" must be a list.',
+                err=True,
+            )
+            sys.exit(1)
+        if not tickets:
+            click.echo(f'Warning: project "{proj["name"]}" has no tickets listed.', err=True)
+        for t in tickets:
+            tid = str(t)
+            if tid in seen_tickets:
+                click.echo(f"Warning: ticket {tid} appears in multiple projects.", err=True)
+            seen_tickets.add(tid)
+        total_assignments += len(tickets)
+
+    if dry_run:
+        click.echo(
+            f"DRY RUN — Would assign {total_assignments} tickets across {len(projects_data)} projects:\n"
+        )
+        for proj in projects_data:
+            tickets = proj.get("tickets", [])
+            ticket_ids = ", ".join(str(t) for t in tickets)
+            click.echo(f"  {proj['name']}:")
+            click.echo(f"    {ticket_ids}")
+        click.echo("\nNo tickets were updated. Remove --dry-run to apply.")
+        return
+
+    tracker = ensure_tracker_configured()
+
+    if not hasattr(tracker, "create_project"):
+        click.echo(
+            "Batch project assignment is only supported for trackers with project support (e.g. Linear).",
+            err=True,
+        )
+        sys.exit(1)
+
+    succeeded = 0
+    failed = 0
+
+    for proj in projects_data:
+        project_name = proj["name"]
+        tickets = proj.get("tickets", [])
+        click.echo(f"\nAssigning to project: {project_name}")
+        for ticket_id in tickets:
+            ticket_id_str = str(ticket_id)
+            try:
+                tracker.update_ticket(ticket_id_str, project=project_name)
+                click.echo(f"  ✓ {ticket_id_str}")
+                succeeded += 1
+            except Exception as e:
+                click.echo(f"  ✗ {ticket_id_str}: {e}", err=True)
+                failed += 1
+
+    click.echo(f"\nAssigned {succeeded}/{total_assignments} tickets.")
+    if failed:
+        click.echo(f"{failed} failed.", err=True)
+        sys.exit(1)
+
+
+def print_ticket(
+    ticket: Ticket,
+    show_children: bool = False,
+    comments: list[dict] | None = None,
+) -> None:
     """Print full ticket details."""
     click.echo(f"\n{ticket.id}: {ticket.title}")
     click.echo("-" * 60)
@@ -1164,12 +1445,21 @@ def print_ticket(ticket: Ticket, show_children: bool = False) -> None:
     if ticket.assignee:
         click.echo(f"Assignee: {ticket.assignee}")
     if ticket.project:
-        click.echo(f"Project: {ticket.project}")
+        project_str = ticket.project
+        if ticket.project_state:
+            project_str += f" ({ticket.project_state})"
+        click.echo(f"Project: {project_str}")
     if ticket.parent_id:
         parent_str = ticket.parent_id
         if ticket.parent_title:
             parent_str += f" ({ticket.parent_title})"
         click.echo(f"Parent: {parent_str}")
+
+    # Blocking relationships
+    if ticket.blocks:
+        click.echo(f"Blocks: {', '.join(ticket.blocks)}")
+    if ticket.blocked_by:
+        click.echo(f"Blocked by: {', '.join(ticket.blocked_by)}")
 
     click.echo(f"URL: {ticket.url}")
 
@@ -1181,6 +1471,19 @@ def print_ticket(ticket: Ticket, show_children: bool = False) -> None:
         click.echo("\nSub-tasks:")
         for child in ticket.children:
             click.echo(f"  - {child.id}: {child.title} ({child.status})")
+
+    # Show comments if provided
+    if comments:
+        click.echo(f"\nComments ({len(comments)}):")
+        for c in comments:
+            date_str = c.get("date", "")[:10]
+            click.echo(f"  {c['author']} ({date_str}):")
+            body = c.get("body", "")
+            if len(body) > 500:
+                body = body[:500] + "..."
+            for line in body.split("\n"):
+                click.echo(f"    {line}")
+            click.echo()
 
     click.echo()
 
@@ -1201,6 +1504,10 @@ def print_ticket_summary(ticket: Ticket) -> None:
         extras.append(f"@{ticket.assignee.split()[0]}")  # First name only
     if ticket.parent_id:
         extras.append(f"↳{ticket.parent_id}")
+    if ticket.blocks:
+        extras.append(f"blocks:{len(ticket.blocks)}")
+    if ticket.blocked_by:
+        extras.append(f"blocked:{len(ticket.blocked_by)}")
 
     extra_str = f" {' '.join(extras)}" if extras else ""
     click.echo(f"  {ticket.id}: {ticket.title} ({ticket.status}){labels}{extra_str}")

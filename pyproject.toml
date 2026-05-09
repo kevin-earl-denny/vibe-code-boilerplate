@@ -18,16 +18,16 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "requests>=2.28.0",
+    "requests>=2.33.1",
     "click>=8.0.0",
     "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
+    "pytest>=9.0.3",
     "pytest-cov>=4.0.0",
-    "mypy>=1.0.0",
+    "mypy>=1.20.1",
     "ruff>=0.1.0",
 ]
 # Optional: Better TOML parsing for fly.toml (falls back to simple parsing if not installed)
@@ -36,7 +36,7 @@ fly = [
 ]
 # Optional: YAML support for batch ticket operations
 batch = [
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]

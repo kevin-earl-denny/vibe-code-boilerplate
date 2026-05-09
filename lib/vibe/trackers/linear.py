@@ -1,5 +1,6 @@
 """Linear.app ticket tracker integration."""
 
+import copy
 import logging
 import os
 from typing import Any
@@ -117,12 +118,34 @@ class LinearTracker(TrackerBase):
                 description
                 state {{ id name }}
                 team {{ id }}
-                labels {{ nodes {{ name }} }}
+                labels {{ nodes {{ id name }} }}
                 url
                 priority
                 assignee {{ id name email }}
-                project {{ id name }}
+                project {{ id name state }}
                 parent {{ id identifier title }}
+                relations(first: 50) {{
+                    nodes {{
+                        id
+                        type
+                        relatedIssue {{
+                            identifier
+                            title
+                            state {{ name }}
+                        }}
+                    }}
+                }}
+                inverseRelations(first: 50) {{
+                    nodes {{
+                        id
+                        type
+                        relatedIssue {{
+                            identifier
+                            title
+                            state {{ name }}
+                        }}
+                    }}
+                }}
                 {children_fragment}
             }}
         }}
@@ -146,6 +169,8 @@ class LinearTracker(TrackerBase):
         priority: str | None = None,
         assignee: str | None = None,
         unassigned: bool = False,
+        view: str | None = None,
+        unblocked: bool = False,
     ) -> list[Ticket]:
         """List tickets with optional filters, with automatic pagination.
 
@@ -158,6 +183,8 @@ class LinearTracker(TrackerBase):
             priority: Filter by priority ("urgent", "high", "medium", "low", "none")
             assignee: Filter by assignee name or "me" for current user
             unassigned: If True, show only unassigned tickets
+            view: Name of a Linear custom view whose filters to apply
+            unblocked: If True, exclude tickets that are blocked by other tickets
         """
         query = """
         query ListIssues($first: Int!, $after: String, $filter: IssueFilter) {
@@ -168,12 +195,34 @@ class LinearTracker(TrackerBase):
                     title
                     description
                     state { name }
-                    labels { nodes { name } }
+                    labels { nodes { id name } }
                     url
                     priority
                     assignee { name }
-                    project { name }
+                    project { name state }
                     parent { identifier }
+                    relations(first: 50) {
+                        nodes {
+                            id
+                            type
+                            relatedIssue {
+                                identifier
+                                title
+                                state { name }
+                            }
+                        }
+                    }
+                    inverseRelations(first: 50) {
+                        nodes {
+                            id
+                            type
+                            relatedIssue {
+                                identifier
+                                title
+                                state { name }
+                            }
+                        }
+                    }
                 }
                 pageInfo {
                     hasNextPage
@@ -182,20 +231,26 @@ class LinearTracker(TrackerBase):
             }
         }
         """
+
+        # Start with view filter if provided
         filter_obj: dict[str, Any] = {}
+        if view:
+            filter_obj = self._get_view_filter(view)
+
+        # Always scope to team
         if self._team_id:
             filter_obj["team"] = {"id": {"eq": self._team_id}}
+
+        # Explicit CLI filters override/merge into view filter
         if status:
             filter_obj["state"] = {"name": {"eq": status}}
         if labels:
             filter_obj["labels"] = {"name": {"in": labels}}
         if project:
-            # Need to resolve project name to ID
             project_id = self._get_project_id(project)
             if project_id:
                 filter_obj["project"] = {"id": {"eq": project_id}}
         if parent:
-            # Resolve parent identifier to UUID
             parent_ticket = self.get_ticket(parent)
             if parent_ticket:
                 parent_uuid = parent_ticket.raw.get("id")
@@ -209,19 +264,19 @@ class LinearTracker(TrackerBase):
             filter_obj["assignee"] = {"null": True}
         elif assignee:
             if assignee.lower() == "me":
-                # Use viewer's ID
                 viewer_id = self._get_viewer_id()
                 if viewer_id:
                     filter_obj["assignee"] = {"id": {"eq": viewer_id}}
             else:
-                # Search by name
                 user_id = self._get_user_id_by_name(assignee)
                 if user_id:
                     filter_obj["assignee"] = {"id": {"eq": user_id}}
 
         all_tickets: list[Ticket] = []
         cursor: str | None = None
-        page_size = min(limit, 50)  # Linear max per page is 50
+        # Fetch extra when post-filtering to compensate for excluded tickets
+        fetch_limit = limit * 3 if unblocked else limit
+        page_size = min(fetch_limit, 50)
 
         try:
             while True:
@@ -236,7 +291,10 @@ class LinearTracker(TrackerBase):
                 issues = data.get("nodes", [])
                 page_info = data.get("pageInfo", {})
 
-                all_tickets.extend(self._parse_issue(issue) for issue in issues)
+                for issue in issues:
+                    if unblocked and self._is_blocked(issue):
+                        continue
+                    all_tickets.append(self._parse_issue(issue))
 
                 if len(all_tickets) >= limit:
                     return all_tickets[:limit]
@@ -251,6 +309,15 @@ class LinearTracker(TrackerBase):
             return all_tickets
         except (requests.RequestException, RuntimeError):
             return all_tickets  # Return what we have so far
+
+    @staticmethod
+    def _is_blocked(issue: dict) -> bool:
+        """Check if an issue has incoming blocking relations."""
+        inverse = issue.get("inverseRelations", {})
+        for rel in inverse.get("nodes", []):
+            if rel.get("type") == "blocks":
+                return True
+        return False
 
     def create_ticket(
         self,
@@ -287,11 +354,11 @@ class LinearTracker(TrackerBase):
                     title
                     description
                     state { name }
-                    labels { nodes { name } }
+                    labels { nodes { id name } }
                     url
                     priority
                     assignee { name }
-                    project { id name }
+                    project { id name state }
                     parent { identifier title }
                 }
             }
@@ -373,7 +440,7 @@ class LinearTracker(TrackerBase):
             title: New title
             description: New description
             status: New status name
-            labels: New labels (replaces existing)
+            labels: Labels to add (merged with existing labels)
             project: Project name to add ticket to
             project_id: Project UUID
             remove_project: If True, remove from current project
@@ -418,9 +485,16 @@ class LinearTracker(TrackerBase):
         if labels:
             team_id = (issue.raw.get("team") or {}).get("id") or self._team_id
             if team_id:
-                label_ids = self._get_or_create_label_ids(team_id, labels)
-                if label_ids:
-                    input_obj["labelIds"] = label_ids
+                new_label_ids = self._get_or_create_label_ids(team_id, labels)
+                if new_label_ids:
+                    # Merge with existing label IDs so --label is additive
+                    existing_label_ids = [
+                        node["id"]
+                        for node in issue.raw.get("labels", {}).get("nodes", [])
+                        if "id" in node
+                    ]
+                    merged = list(dict.fromkeys(existing_label_ids + new_label_ids))
+                    input_obj["labelIds"] = merged
 
         # Project support
         if remove_project:
@@ -473,11 +547,11 @@ class LinearTracker(TrackerBase):
                     title
                     description
                     state { name }
-                    labels { nodes { name } }
+                    labels { nodes { id name } }
                     url
                     priority
                     assignee { name }
-                    project { id name }
+                    project { id name state }
                     parent { identifier title }
                 }
             }
@@ -510,6 +584,52 @@ class LinearTracker(TrackerBase):
             mutation,
             {"input": {"issueId": issue_uuid, "body": body}},
         )
+
+    def get_comments(self, ticket_id: str, limit: int = 20) -> list[dict]:
+        """Fetch comments for a Linear issue.
+
+        Returns list of dicts with keys: author, date, body, is_bot.
+        """
+        issue = self.get_ticket(ticket_id)
+        if not issue:
+            raise RuntimeError(f"Ticket not found: {ticket_id}")
+        issue_uuid = issue.raw.get("id")
+        if not issue_uuid:
+            raise RuntimeError("Cannot fetch comments: issue has no id")
+
+        query = """
+        query GetComments($id: String!, $first: Int!) {
+            issue(id: $id) {
+                comments(first: $first) {
+                    nodes {
+                        body
+                        createdAt
+                        user { name }
+                        botActor { name }
+                    }
+                }
+            }
+        }
+        """
+        result = self._execute_query(query, {"id": issue_uuid, "first": limit})
+        nodes = result.get("data", {}).get("issue", {}).get("comments", {}).get("nodes", [])
+
+        comments = []
+        for node in nodes:
+            is_bot = node.get("botActor") is not None
+            if is_bot:
+                author = f"Bot: {node['botActor'].get('name', 'Unknown')}"
+            else:
+                author = (node.get("user") or {}).get("name", "Unknown")
+            comments.append(
+                {
+                    "author": author,
+                    "date": node.get("createdAt", ""),
+                    "body": node.get("body", ""),
+                    "is_bot": is_bot,
+                }
+            )
+        return comments
 
     def validate_config(self) -> tuple[bool, list[str]]:
         """Validate Linear configuration."""
@@ -819,6 +939,67 @@ class LinearTracker(TrackerBase):
         """
         self.create_relation(ticket_id, related_id, relation_type)
 
+    def remove_relation(
+        self, ticket_id: str, related_id: str, relation_type: str = "blocks"
+    ) -> bool:
+        """Remove a relationship between two Linear issues.
+
+        Finds the relation by matching the related ticket identifier and type,
+        then deletes it using issueRelationDelete.
+
+        Args:
+            ticket_id: The ticket that owns the relation
+            related_id: The related ticket identifier
+            relation_type: Type of relation to remove ("blocks" or "blocked_by")
+
+        Returns:
+            True if the relation was removed successfully
+        """
+        ticket = self.get_ticket(ticket_id)
+        if not ticket:
+            raise RuntimeError(f"Ticket not found: {ticket_id}")
+
+        # Find the relation ID by matching direction + related ticket
+        relation_id = None
+        if relation_type == "blocked_by":
+            candidates = ticket.raw.get("inverseRelations", {}).get("nodes", [])
+            expected_type = "blocks"
+        else:
+            candidates = ticket.raw.get("relations", {}).get("nodes", [])
+            expected_type = relation_type
+
+        for relation in candidates:
+            related = relation.get("relatedIssue") or {}
+            rel_identifier = related.get("identifier", "")
+            rel_type = relation.get("type", "")
+            if rel_identifier == related_id and rel_type == expected_type:
+                relation_id = relation.get("id")
+                break
+
+        if not relation_id:
+            raise RuntimeError(
+                f"No '{relation_type}' relation found between {ticket_id} and {related_id}"
+            )
+
+        mutation = """
+        mutation DeleteIssueRelation($id: String!) {
+            issueRelationDelete(id: $id) {
+                success
+            }
+        }
+        """
+
+        try:
+            result = self._execute_query(mutation, {"id": relation_id})
+            success: bool = (
+                result.get("data", {}).get("issueRelationDelete", {}).get("success", False)
+            )
+            if not success:
+                raise RuntimeError(f"Failed to delete relation {relation_id}")
+            return success
+        except requests.RequestException as e:
+            raise RuntimeError(f"Failed to remove relation: {e}") from e
+
     def _parse_issue(self, issue: dict, include_children: bool = False) -> Ticket:
         """Parse a Linear issue into a Ticket."""
         state = issue.get("state") or {}
@@ -832,6 +1013,28 @@ class LinearTracker(TrackerBase):
             children_nodes = issue.get("children", {}).get("nodes", [])
             children = [self._parse_issue(child) for child in children_nodes]
 
+        # Parse blocking relationships from relations and inverseRelations
+        blocks: list[str] = []
+        blocked_by: list[str] = []
+        # Forward relations: if type="blocks", this issue blocks relatedIssue
+        for rel in issue.get("relations", {}).get("nodes", []):
+            rel_type = rel.get("type", "")
+            related = rel.get("relatedIssue") or {}
+            identifier = related.get("identifier", "")
+            if not identifier:
+                continue
+            if rel_type == "blocks":
+                blocks.append(identifier)
+        # Inverse relations: if type="blocks", relatedIssue blocks this issue
+        for rel in issue.get("inverseRelations", {}).get("nodes", []):
+            rel_type = rel.get("type", "")
+            related = rel.get("relatedIssue") or {}
+            identifier = related.get("identifier", "")
+            if not identifier:
+                continue
+            if rel_type == "blocks":
+                blocked_by.append(identifier)
+
         return Ticket(
             id=issue.get("identifier", issue.get("id", "")),
             title=issue.get("title", ""),
@@ -844,10 +1047,81 @@ class LinearTracker(TrackerBase):
             assignee=assignee.get("name"),
             project=project.get("name"),
             project_id=project.get("id"),
+            project_state=project.get("state"),
             parent_id=parent.get("identifier"),
             parent_title=parent.get("title"),
             children=children,
+            blocks=blocks,
+            blocked_by=blocked_by,
         )
+
+    # -------------------------------------------------------------------------
+    # Custom Views
+    # -------------------------------------------------------------------------
+
+    def list_views(self) -> list[dict[str, Any]]:
+        """Fetch all custom views from Linear.
+
+        Returns a list of dicts with keys: name, id, filterData, owner.
+        Results are cached for 30 minutes.
+        """
+        cache = get_cache()
+        cache_key = "linear_custom_views"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            result_views: list[dict[str, Any]] = cached
+            return result_views
+
+        query = """
+        query ListCustomViews {
+            customViews {
+                nodes {
+                    id
+                    name
+                    filterData
+                    owner { name }
+                }
+            }
+        }
+        """
+        try:
+            result = self._execute_query(query)
+            nodes = result.get("data", {}).get("customViews", {}).get("nodes", [])
+            views = [
+                {
+                    "id": v.get("id", ""),
+                    "name": v.get("name", ""),
+                    "filterData": v.get("filterData", {}),
+                    "owner": (v.get("owner") or {}).get("name", ""),
+                }
+                for v in nodes
+            ]
+            cache.set(cache_key, views, ttl=1800)
+            return views
+        except (requests.RequestException, RuntimeError) as e:
+            raise RuntimeError(f"Failed to fetch custom views: {e}") from e
+
+    def _get_view_filter(self, view_name: str) -> dict[str, Any]:
+        """Get the filterData for a named custom view.
+
+        Raises RuntimeError if the view is not found or is ambiguous.
+        """
+        views = self.list_views()
+        name_lower = view_name.lower()
+        matches = [v for v in views if v["name"].lower() == name_lower]
+
+        if not matches:
+            available = ", ".join(sorted(v["name"] for v in views)) or "(none)"
+            raise RuntimeError(f"Custom view '{view_name}' not found. Available views: {available}")
+
+        if len(matches) > 1:
+            owners = ", ".join(f"'{m['name']}' (owner: {m['owner']})" for m in matches)
+            raise RuntimeError(
+                f"Multiple views match '{view_name}': {owners}. Use the exact name to disambiguate."
+            )
+
+        filter_data: dict[str, Any] = matches[0].get("filterData", {})
+        return copy.deepcopy(filter_data)
 
     # -------------------------------------------------------------------------
     # Project Management
