@@ -191,6 +191,15 @@ def get_config() -> tuple[str, str, str]:
             "or `export AXIOM_API_TOKEN=...` for this shell."
         )
 
+    if not org:
+        raise CLIError(
+            "AXIOM_ORG_ID not found.\n"
+            f"  Looked in env var $AXIOM_ORG_ID and {env_file}.\n"
+            "  Fix: drop AXIOM_ORG_ID=<your-org-id> into .env.local, "
+            "or `export AXIOM_ORG_ID=...` for this shell.\n"
+            "  Find your org ID at: https://app.axiom.co (Settings → General)."
+        )
+
     return token, dataset, org
 
 
