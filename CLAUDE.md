@@ -714,6 +714,10 @@ bin/vibe do PROJ-123        # Create worktree for ticket
 bin/secrets list            # List secrets
 bin/secrets sync            # Sync to provider
 
+# Local CI mirror — run before pushing
+bin/ci-local                # Run all locally-runnable CI checks
+bin/ci-local --fast         # Skip frontend tests (faster feedback)
+
 # Multi-assistant support
 bin/vibe generate-agent-instructions  # Generate instruction files for all assistants
 bin/vibe generate-agent-instructions --format cursor  # Generate for specific format
@@ -761,6 +765,26 @@ Read the actual failure first (`gh pr checks <number>`, then `gh run view <run-i
 9. **Don't leave merged worktrees around** - After a PR is merged, remove the worktree, delete the local branch, and run `bin/vibe doctor`.
 10. **Don't use `cd path && command`** - Use `git -C path`, `npm --prefix path`, or `gh pr create --repo owner/repo` so commands can run without changing directory and can be parallelized when appropriate.
 11. **Don't use multiple worktree systems for the same ticket** - If using `bin/vibe do`, do not also use Claude Code's `isolation: "worktree"` for the same ticket. This creates duplicate branches and duplicate PRs. See [Avoiding Duplicate PRs](#avoiding-duplicate-prs-multiple-worktree-systems).
+12. **Don't ship a CLI PR without smoke-testing every command of the modified CLI** — see [`agent_instructions/CLI.md`](agent_instructions/CLI.md). Live local runs only; document the test matrix (✅/❌/⏸️) in the PR description. ⏸️ requires a `<CLI>: test + fix <command>` follow-up ticket blocked by the dependency.
+13. **Don't add CLI tests to GitHub Actions** — local live tests are the source of truth. CI tests of CLIs tend to mock the world and pass while the real command is broken. Test files are for regression detection, not primary verification.
+14. **Don't ship thin CLI wrappers** — see [`agent_instructions/CLI.md`](agent_instructions/CLI.md). Default to maximalist surface area + thorough docs. Inline `--help` + `docs/operations/<cli>-cli-reference.md` + a row in this file's CLI Reference all land in the same PR as the new subcommand.
+15. **Don't silently retry or ignore CLI errors** — classify every error: agent's fault → write a feedback memory file (`feedback_cli_<cli>_<topic>.md`); CLI's fault → file an Urgent Linear ticket and post to your project's CLI/agent-DX discussion channel. Any DX papercut qualifies — the bar is intentionally low.
+
+---
+
+## CLI Conventions
+
+The full doctrine for `bin/*` wrappers lives in [`agent_instructions/CLI.md`](agent_instructions/CLI.md). Three rules in summary:
+
+1. **Reliability — capture or file.** Every CLI error gets either a memory entry (agent's fault) or an Urgent ticket + DX-channel post (CLI's fault). The bar is intentionally low — every DX papercut qualifies.
+
+2. **Pre-PR testing — smoke-test every subcommand.** Live local runs only. Document the matrix (`✅`/`❌`/`⏸️`) in the PR description. **No CLI tests in GitHub Actions** — mocked CLI tests pass while real commands silently break (the `bin/logs` parser-drift incident is the exemplar).
+
+3. **Maximalist + documented.** Ship every useful subcommand at once; same-PR docs (inline `--help` + `docs/operations/<cli>-cli-reference.md` + this file's CLI Reference row).
+   - **Output formats:** pretty (TTY default), jsonl (piped default), `--format pretty|json|jsonl|raw|csv` override.
+   - **Exit codes:** `0` success · `1` expected error · `2` parser drift (treat as incident, not flake) · `3` network/API error.
+
+When building a new `bin/<cli>`, copy [`recipes/cli/cli-reference-template.md`](recipes/cli/cli-reference-template.md) to `docs/operations/<cli>-cli-reference.md` and follow the per-subcommand structure. Run `bin/ci-local` before pushing; the local CI mirror catches lint, format, and project-specific sync issues that would otherwise cost a full GHA cycle.
 
 ---
 
