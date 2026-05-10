@@ -8,6 +8,7 @@ from lib.vibe.doctor import (
     CheckResult,
     Status,
     check_config_exists,
+    check_git_hooks_path,
     check_github_config,
     check_python_version,
     check_tracker_config,
@@ -193,3 +194,102 @@ class TestStatusEnum:
         """All status values are distinct."""
         values = [s.value for s in Status]
         assert len(values) == len(set(values))
+
+
+class TestCheckGitHooksPath:
+    """Tests for check_git_hooks_path."""
+
+    def test_skips_when_no_githooks_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When .githooks/ doesn't exist, the check skips cleanly."""
+        monkeypatch.chdir(tmp_path)
+        result = check_git_hooks_path()
+        assert result.status == Status.SKIP
+        assert "No .githooks/" in result.message
+
+    def test_warns_when_hooks_path_unset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When .githooks/ exists but core.hooksPath isn't set, warn with fix_hint."""
+        # Create a fresh git repo with .githooks/ but no hooksPath
+        import subprocess as _sp
+
+        _sp.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+        (tmp_path / ".githooks").mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        result = check_git_hooks_path()
+        assert result.status == Status.WARN
+        assert "core.hooksPath" in result.message
+        assert result.fix_hint is not None
+        assert "git config --local core.hooksPath .githooks" in result.fix_hint
+
+    def test_warns_when_hooks_path_wrong(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When core.hooksPath is set but to the wrong value, warn with fix_hint."""
+        import subprocess as _sp
+
+        _sp.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+        (tmp_path / ".githooks").mkdir()
+        _sp.run(
+            ["git", "config", "--local", "core.hooksPath", "custom-hooks"],
+            cwd=tmp_path,
+            check=True,
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = check_git_hooks_path()
+        assert result.status == Status.WARN
+        assert "custom-hooks" in result.message
+        assert ".githooks" in result.message
+
+    def test_passes_when_correctly_configured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Properly wired hooks return PASS."""
+        import subprocess as _sp
+
+        _sp.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+        hooks_dir = tmp_path / ".githooks"
+        hooks_dir.mkdir()
+        # Create executable pre-commit so the executable check doesn't trip
+        pre_commit = hooks_dir / "pre-commit"
+        pre_commit.write_text("#!/usr/bin/env bash\nexit 0\n")
+        pre_commit.chmod(0o755)
+        _sp.run(
+            ["git", "config", "--local", "core.hooksPath", ".githooks"],
+            cwd=tmp_path,
+            check=True,
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = check_git_hooks_path()
+        assert result.status == Status.PASS
+        assert "wired up" in result.message
+
+    def test_warns_when_hooks_not_executable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-executable hooks are silently ignored by git — flag them."""
+        import subprocess as _sp
+
+        _sp.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+        hooks_dir = tmp_path / ".githooks"
+        hooks_dir.mkdir()
+        pre_commit = hooks_dir / "pre-commit"
+        pre_commit.write_text("#!/usr/bin/env bash\nexit 0\n")
+        pre_commit.chmod(0o644)  # not executable
+        _sp.run(
+            ["git", "config", "--local", "core.hooksPath", ".githooks"],
+            cwd=tmp_path,
+            check=True,
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = check_git_hooks_path()
+        assert result.status == Status.WARN
+        assert "not executable" in result.message
+        assert result.fix_hint is not None
+        assert "chmod +x" in result.fix_hint

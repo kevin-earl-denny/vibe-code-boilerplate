@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Pre-push hook for vibe-code-boilerplate projects.
+#
+# Runs lint + sync checks locally before a push reaches CI. Saves GitHub
+# Actions minutes (~1.6-2k/month on a busy project — DEAL-2284 economics)
+# and gives faster feedback than a full GHA cycle.
+#
+# Non-blocking on missing dependencies: when ruff or python isn't installed,
+# the hook exits 0 with a notice. The hook surfaces the skip; CI is the
+# safety net. To bypass when needed: git push --no-verify
+#
+# Setup (once per clone): git config --local core.hooksPath .githooks
+# Works across worktrees — git resolves the relative path from each
+# worktree's root.
+#
+# Project-specific extensions: drop executable scripts into
+# .githooks/pre-push.d/*.sh — they run after the standard checks.
+
+HOOK="[pre-push]"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+cd "$REPO_ROOT"
+
+# ── Runner detection ─────────────────────────────────────────────────────────
+# Prefer uv run (project standard); fall back to system tools.
+if command -v uv >/dev/null 2>&1; then
+  PY="uv run python"
+  RUFF="uv run ruff"
+else
+  PY="python3"
+  RUFF="ruff"
+fi
+
+# Non-blocking guards: missing tools cause a notice + exit 0, not failure.
+if ! $RUFF --version >/dev/null 2>&1; then
+  echo "$HOOK ruff not available — skipping pre-push checks. Run 'pip install ruff' or 'uv sync'."
+  exit 0
+fi
+
+if ! $PY -c "print()" >/dev/null 2>&1; then
+  echo "$HOOK Python not available — skipping pre-push checks."
+  exit 0
+fi
+
+# ── Failure tracking ─────────────────────────────────────────────────────────
+FAILURES=()
+
+run_check() {
+  local name="$1"; shift
+  if ! "$@"; then
+    FAILURES+=("$name")
+  fi
+}
+
+# ── 1. ruff: lint + format ───────────────────────────────────────────────────
+echo "$HOOK ruff..."
+run_check "ruff check" $RUFF check . --output-format=concise
+run_check "ruff format" $RUFF format . --check --diff --quiet
+
+# ── 2. mypy (if lib/vibe/ exists) ────────────────────────────────────────────
+# Mirrors the lint.yml workflow. Projects with a different layout can add
+# their own mypy invocation via .githooks/pre-push.d/<name>.sh
+if command -v mypy >/dev/null 2>&1 && [[ -d "$REPO_ROOT/lib/vibe" ]]; then
+  echo "$HOOK mypy..."
+  run_check "mypy" mypy lib/vibe/
+fi
+
+# ── 3. pytest (only if explicitly opted in via VIBE_PRE_PUSH_PYTEST=1) ───────
+# Tests can be slow; opt-in keeps the hook fast by default. Set the env var
+# in your shell or .envrc when you want pre-push to also run pytest.
+if [[ "${VIBE_PRE_PUSH_PYTEST:-0}" = "1" ]]; then
+  if command -v pytest >/dev/null 2>&1; then
+    echo "$HOOK pytest (opt-in via VIBE_PRE_PUSH_PYTEST=1)..."
+    run_check "pytest" pytest --tb=short -q
+  fi
+fi
+
+# ── 4. Project-specific drop-ins ─────────────────────────────────────────────
+EXTRA_DIR="$REPO_ROOT/.githooks/pre-push.d"
+if [[ -d "$EXTRA_DIR" ]]; then
+  shopt -s nullglob
+  for script in "$EXTRA_DIR"/*.sh; do
+    if [[ -x "$script" ]]; then
+      name=$(basename "$script")
+      echo "$HOOK $name..."
+      run_check "$name" "$script"
+    fi
+  done
+  shopt -u nullglob
+fi
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+if [[ ${#FAILURES[@]} -gt 0 ]]; then
+  echo ""
+  echo "$HOOK Pre-push checks FAILED:"
+  for f in "${FAILURES[@]}"; do
+    echo "  ✗ $f"
+  done
+  echo ""
+  echo "$HOOK Fix the above, then push again. To bypass: git push --no-verify"
+  exit 1
+fi
+
+echo "$HOOK All pre-push checks passed."
+exit 0

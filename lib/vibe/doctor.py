@@ -93,6 +93,9 @@ def run_doctor(
     # Local hooks check
     results.append(check_local_hooks())
 
+    # Git hooks check (.githooks/ + core.hooksPath)
+    results.append(check_git_hooks_path())
+
     # Worktree check
     results.append(check_stale_worktrees())
 
@@ -496,6 +499,85 @@ def check_local_hooks() -> CheckResult:
             fix_hint="Fix JSON syntax in .claude/settings.local.json",
             category="integration",
         )
+
+
+def check_git_hooks_path() -> CheckResult:
+    """Check that the project's git hooks are wired up.
+
+    The boilerplate ships a .githooks/ directory with pre-commit + pre-push
+    hooks. They only fire when core.hooksPath is set to .githooks (a one-time
+    per-clone setup). This check warns if the path isn't set or points
+    elsewhere.
+    """
+    githooks_dir = Path(".githooks")
+    if not githooks_dir.is_dir():
+        # No .githooks/ in this project — nothing to wire up.
+        return CheckResult(
+            name="Git hooks",
+            status=Status.SKIP,
+            message="No .githooks/ directory in project",
+            category="integration",
+        )
+
+    try:
+        result = subprocess.run(
+            ["git", "config", "--local", "--get", "core.hooksPath"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (FileNotFoundError, OSError) as exc:
+        return CheckResult(
+            name="Git hooks",
+            status=Status.WARN,
+            message=f"Could not query git config: {exc}",
+            category="integration",
+        )
+
+    configured = result.stdout.strip()
+    expected = ".githooks"
+
+    if not configured:
+        return CheckResult(
+            name="Git hooks",
+            status=Status.WARN,
+            message="core.hooksPath not configured — pre-commit/pre-push hooks won't fire",
+            fix_hint="Run: git config --local core.hooksPath .githooks",
+            category="integration",
+        )
+
+    if configured != expected:
+        return CheckResult(
+            name="Git hooks",
+            status=Status.WARN,
+            message=f"core.hooksPath is '{configured}', expected '{expected}'",
+            fix_hint=f"Run: git config --local core.hooksPath {expected}",
+            category="integration",
+        )
+
+    # Verify the hook files are executable. Non-executable hooks are silently
+    # ignored by git, which is a common cause of "hooks aren't running" reports.
+    non_executable = []
+    for hook_name in ("pre-commit", "pre-push"):
+        hook_path = githooks_dir / hook_name
+        if hook_path.exists() and not os.access(hook_path, os.X_OK):
+            non_executable.append(hook_name)
+
+    if non_executable:
+        return CheckResult(
+            name="Git hooks",
+            status=Status.WARN,
+            message=f"Hooks not executable: {', '.join(non_executable)}",
+            fix_hint=f"Run: chmod +x .githooks/{' .githooks/'.join(non_executable)}",
+            category="integration",
+        )
+
+    return CheckResult(
+        name="Git hooks",
+        status=Status.PASS,
+        message="core.hooksPath = .githooks (pre-commit, pre-push wired up)",
+        category="integration",
+    )
 
 
 def check_stale_worktrees() -> CheckResult:

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Pre-commit hook for vibe-code-boilerplate projects.
+#
+# Runs lightweight regeneration tasks for files that should never go stale.
+# Currently handles:
+#   - OpenAPI spec regeneration when API files change (FastAPI projects only)
+#   - Project-specific drop-ins under .githooks/pre-commit.d/*.sh
+#
+# Non-blocking: when dependencies are missing, the hook prints a notice and
+# exits 0. The hook surfaces the skip; CI is the safety net.
+#
+# One-time setup (per clone): git config --local core.hooksPath .githooks
+# Works across worktrees — git resolves the relative path from each worktree's
+# root, and every checkout has .githooks/.
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+HOOK="[pre-commit]"
+
+cd "$REPO_ROOT"
+
+# ── 1. OpenAPI spec regeneration (FastAPI projects) ──────────────────────────
+# Triggers when staged files match the api-paths regex (default: api/ or
+# schemas/pydantic/) AND scripts/export_openapi.py exists.
+#
+# This prevents the recurring "test_spec_is_current" CI failure pattern in
+# FastAPI projects where docs/api/openapi.json must match the live OpenAPI
+# schema.
+
+OPENAPI_SCRIPT="scripts/export_openapi.py"
+OPENAPI_OUTPUT="docs/api/openapi.json"
+API_PATHS_REGEX='^(api/|schemas/pydantic/)'
+
+# Allow project override via .vibe/config.json (parsed via Python — keep it
+# light, no jq dependency).
+if [[ -f ".vibe/config.json" ]] && command -v python3 >/dev/null 2>&1; then
+  override=$(python3 -c '
+import json, sys
+try:
+    with open(".vibe/config.json") as f:
+        cfg = json.load(f)
+    print(cfg.get("git_hooks", {}).get("pre_commit", {}).get("api_paths_regex", ""))
+except Exception:
+    pass
+' 2>/dev/null)
+  if [[ -n "$override" ]]; then
+    API_PATHS_REGEX="$override"
+  fi
+fi
+
+if [[ -f "$OPENAPI_SCRIPT" ]]; then
+  if git diff --cached --name-only | grep -qE "$API_PATHS_REGEX"; then
+    echo "$HOOK API files changed — regenerating OpenAPI spec..."
+
+    # Detect runner (uv preferred, fall back to system python)
+    if command -v uv >/dev/null 2>&1; then
+      RUNNER="uv run python"
+    elif command -v python3 >/dev/null 2>&1; then
+      RUNNER="python3"
+    else
+      echo "$HOOK No Python runner found — skipping OpenAPI regen."
+      RUNNER=""
+    fi
+
+    if [[ -n "$RUNNER" ]]; then
+      # Sanity check: deps installed
+      if ! $RUNNER -c "import fastapi" 2>/dev/null; then
+        echo "$HOOK FastAPI not installed — run 'uv sync --all-extras' or 'pip install -e .[backend]'. Skipping spec regen."
+      elif $RUNNER "$OPENAPI_SCRIPT" 2>/dev/null; then
+        if ! git diff --quiet "$OPENAPI_OUTPUT" 2>/dev/null; then
+          git add "$OPENAPI_OUTPUT"
+          echo "$HOOK Updated $OPENAPI_OUTPUT"
+        fi
+      else
+        echo "$HOOK OpenAPI spec regeneration failed (non-blocking)."
+      fi
+    fi
+  fi
+fi
+
+# ── 2. Project-specific drop-ins ─────────────────────────────────────────────
+EXTRA_DIR="$REPO_ROOT/.githooks/pre-commit.d"
+if [[ -d "$EXTRA_DIR" ]]; then
+  shopt -s nullglob
+  for script in "$EXTRA_DIR"/*.sh; do
+    if [[ -x "$script" ]]; then
+      "$script" || echo "$HOOK $(basename "$script") exited non-zero (non-blocking)."
+    fi
+  done
+  shopt -u nullglob
+fi
+
+exit 0
