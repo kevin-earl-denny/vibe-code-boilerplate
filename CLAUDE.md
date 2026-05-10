@@ -628,6 +628,7 @@ Browse `recipes/` for the full collection. Key recipes:
 
 - `recipes/workflows/git-worktrees.md` — Parallel development
 - `recipes/workflows/branching-and-rebasing.md` — Git workflow
+- `recipes/git-hooks/git-hooks.md` — Pre-commit + pre-push hook setup (saves CI minutes)
 - `recipes/workflows/multi-agent-coordination.md` — Multi-agent conflict prevention
 - `recipes/workflows/pr-risk-assessment.md` — Risk classification
 - `recipes/agents/sub-agent-patterns.md` — Sub-agent task decomposition
