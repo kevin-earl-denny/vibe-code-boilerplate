@@ -95,10 +95,10 @@ fi
 if [[ "$HAS_PYTHON_PROJECT" == "true" ]]; then
   # Resolve python interpreter — prefer 3.11+, fall back to python3
   PYTHON_BIN=""
-  for candidate in python3.13 python3.12 python3.11 python python3; do
+  for candidate in python3.13 python3.12 python3.11 python3 python; do
     if command -v "$candidate" >/dev/null 2>&1; then
-      ver=$("$candidate" -c 'import sys; print(sys.version_info.major*10+sys.version_info.minor)' 2>/dev/null || echo "0")
-      if [[ "$ver" -ge 311 ]]; then
+      # exit 0 iff major.minor >= 3.11
+      if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
         PYTHON_BIN="$candidate"
         break
       fi
@@ -120,25 +120,23 @@ if [[ "$HAS_PYTHON_PROJECT" == "true" ]]; then
     skip_check "ruff" "not installed (pip install ruff)"
   fi
 
-  if command -v mypy >/dev/null 2>&1 && [[ -d "$REPO_ROOT/lib" ]]; then
-    # Detect target dir — common conventions
-    if [[ -d "$REPO_ROOT/lib/vibe" ]]; then
-      run_check "mypy" mypy lib/vibe/
-    else
-      run_check "mypy" mypy lib/
-    fi
+  if command -v mypy >/dev/null 2>&1 && [[ -d "$REPO_ROOT/lib/vibe" ]]; then
+    # Mirrors the lint.yml workflow: mypy lib/vibe/
+    # Projects with a different layout can add their own mypy invocation
+    # via .githooks/ci-local.d/<name>.sh
+    run_check "mypy" mypy lib/vibe/
   else
-    skip_check "mypy" "not installed or no lib/ dir to check"
+    skip_check "mypy" "not installed, or no lib/vibe/ dir to check"
   fi
 fi
 
 # ── 4. Python tests: pytest ──────────────────────────────────────────────────
 if [[ "$HAS_PYTHON_PROJECT" == "true" ]]; then
   if command -v pytest >/dev/null 2>&1; then
-    if [[ -d "$REPO_ROOT/tests" ]] || grep -q "^\[tool.pytest\]" "$REPO_ROOT/pyproject.toml" 2>/dev/null; then
+    if [[ -d "$REPO_ROOT/tests" ]] || grep -qE "^\[tool\.pytest" "$REPO_ROOT/pyproject.toml" 2>/dev/null; then
       run_check "pytest" pytest --tb=short -q
     else
-      skip_check "pytest" "no tests/ dir or [tool.pytest] config"
+      skip_check "pytest" "no tests/ dir or [tool.pytest*] config"
     fi
   else
     skip_check "pytest" "not installed (pip install pytest)"
