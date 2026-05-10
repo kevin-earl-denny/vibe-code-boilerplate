@@ -646,6 +646,7 @@ Browse `recipes/` for the full collection. Key recipes:
 - `recipes/debugging/cors-errors.md` — CORS diagnosis
 - `recipes/integrations/promptvault.md` — LLM prompt management
 - `recipes/integrations/sentry.md` — Error monitoring
+- `recipes/observability/axiom.md` — Axiom log shipping + bin/logs CLI
 - `recipes/integrations/neon.md` — Neon Postgres
 - `recipes/deployment/fly-io.md` — Fly.io deployment
 - `recipes/deployment/vercel.md` — Vercel deployment
@@ -678,6 +679,7 @@ Use these slash commands for common workflows:
 | `/sentry` | Configure Sentry error monitoring and releases |
 | `/neon` | Manage Neon serverless Postgres and database branches |
 | `/figma` | Design-to-code workflow: analyze codebase, generate Figma AI prompts, create tickets |
+| `/logs` | Query Axiom application logs — investigation playbook + presets for errors, slow requests, request tracing, etc. |
 
 Skills are defined in `.claude/commands/` and can be customized per project.
 
@@ -718,6 +720,17 @@ bin/secrets sync            # Sync to provider
 # Local CI mirror — run before pushing
 bin/ci-local                # Run all locally-runnable CI checks
 bin/ci-local --fast         # Skip frontend tests (faster feedback)
+
+# Application logs (Axiom)
+bin/logs help               # Extended help with QUICK START + all flags
+bin/logs health             # Token + dataset + recent-data sanity check
+bin/logs errors --since 6h  # Recent error/critical rows
+bin/logs slow --since 1h    # Slow HTTP requests (default >2s)
+bin/logs path /api/X        # Logs for an HTTP path prefix
+bin/logs request <id>       # All logs for one request_id
+bin/logs summary --since 1h # Birds-eye dashboard
+# Full reference: docs/operations/logs-cli-reference.md
+# Setup recipe:   recipes/observability/axiom.md
 
 # Multi-assistant support
 bin/vibe generate-agent-instructions  # Generate instruction files for all assistants
